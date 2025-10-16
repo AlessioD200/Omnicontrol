@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
+import '../config/app_config.dart';
 import '../models/device.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,20 +15,39 @@ class OmniProvider extends ChangeNotifier {
   String? lastError;
   bool hideNoisyDevices = true;
   Map<String, String> pairingJobs = {}; // jobId -> status
+  Future<void>? _initFuture;
 
   OmniProvider({required this.api});
 
+  String? get currentHub => api.hasBaseUrl ? api.baseUrl : selectedHub;
+  bool get hasHubConfigured => api.hasBaseUrl;
+
   Future<void> init() async {
+    _initFuture ??= _initialize();
+    return _initFuture!;
+  }
+
+  Future<void> _initialize() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('hub_base_url');
     hideNoisyDevices = prefs.getBool('hide_noisy_devices') ?? true;
+    linkedAccount = await AppConfig.loadLinkedToken();
+    final saved = await AppConfig.loadHubUrl();
     if (saved != null && saved.isNotEmpty) {
       api.setBaseUrl(saved);
+      selectedHub = saved;
       await checkConnection();
+      if (connected) {
+        await refresh();
+      }
     }
   }
 
   Future<void> refresh() async {
+    if (!hasHubConfigured) {
+      devices = [];
+      notifyListeners();
+      return;
+    }
     loading = true;
     notifyListeners();
     try {
@@ -46,8 +66,8 @@ class OmniProvider extends ChangeNotifier {
         if (a.paired && !b.paired) return a;
         if (b.paired && !a.paired) return b;
         // Prefer one that has a proper name (not equal to address and non-empty)
-  final aHasName = a.name.trim().isNotEmpty && a.name.trim() != a.address;
-  final bHasName = b.name.trim().isNotEmpty && b.name.trim() != b.address;
+        final aHasName = a.name.trim().isNotEmpty && a.name.trim() != a.address;
+        final bHasName = b.name.trim().isNotEmpty && b.name.trim() != b.address;
         if (aHasName && !bHasName) return a;
         if (bHasName && !aHasName) return b;
         // Prefer one with RSSI (recent scan)
@@ -88,6 +108,11 @@ class OmniProvider extends ChangeNotifier {
   }
 
   Future<void> scan() async {
+    if (!hasHubConfigured) {
+      lastError = 'Configure a hub before scanning';
+      notifyListeners();
+      throw Exception(lastError);
+    }
     lastError = null;
     try {
       await api.scan();
@@ -191,9 +216,8 @@ class OmniProvider extends ChangeNotifier {
       linkedAccount = token;
       selectedHub = hubUrl;
       api.setBaseUrl(hubUrl);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('hub_base_url', hubUrl);
-      await prefs.setString('linked_account_token', token);
+      await AppConfig.saveHubUrl(hubUrl);
+      await AppConfig.saveLinkedToken(token);
       // Optionally request server-confirmed info
       await checkConnection();
       notifyListeners();
@@ -202,6 +226,36 @@ class OmniProvider extends ChangeNotifier {
       notifyListeners();
       rethrow;
     }
+  }
+
+  Future<void> configureHub(String hubUrl) async {
+    selectedHub = hubUrl;
+    api.setBaseUrl(hubUrl);
+    await AppConfig.saveHubUrl(hubUrl);
+    await checkConnection();
+    if (connected) {
+      await refresh();
+    }
+  }
+
+  Future<void> linkAccountToken(String token) async {
+    final hubUrl = currentHub;
+    if (hubUrl == null) {
+      throw Exception('Configure hub before linking account');
+    }
+    await api.linkHubToAccount(hubUrl, token);
+    linkedAccount = token;
+    await AppConfig.saveLinkedToken(token);
+    notifyListeners();
+  }
+
+  Future<void> clearHub() async {
+    selectedHub = null;
+    devices = [];
+    api.clearBaseUrl();
+    await AppConfig.saveHubUrl(null);
+    connected = false;
+    notifyListeners();
   }
 
   Future<Map<String, dynamic>> checkFirmware() async {
@@ -312,5 +366,24 @@ class OmniProvider extends ChangeNotifier {
       notifyListeners();
       rethrow;
     }
+  }
+
+  Future<void> registerCamera({
+    required String id,
+    required String name,
+    required String ip,
+    required String username,
+    required String password,
+    String path = 'stream1',
+  }) async {
+    await api.registerCamera(
+      id: id,
+      name: name,
+      ip: ip,
+      username: username,
+      password: password,
+      path: path,
+    );
+    await refresh();
   }
 }

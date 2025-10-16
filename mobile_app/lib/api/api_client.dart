@@ -5,19 +5,35 @@ import 'dart:io';
 import 'package:multicast_dns/multicast_dns.dart';
 
 class ApiClient {
-  String baseUrl;
-  ApiClient({required this.baseUrl});
+  String _baseUrl;
+  ApiClient({String? baseUrl}) : _baseUrl = baseUrl ?? '';
 
-  void setBaseUrl(String url) => baseUrl = url;
+  String get baseUrl => _baseUrl;
+  bool get hasBaseUrl => _baseUrl.isNotEmpty;
+
+  void setBaseUrl(String url) {
+    final trimmed = url.trim();
+    final normalized = trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+    _baseUrl = normalized;
+  }
+  void clearBaseUrl() => _baseUrl = '';
+
+  Uri _uri(String path) {
+    if (_baseUrl.isEmpty) {
+      throw StateError('Hub base URL not configured');
+    }
+    final normalized = path.startsWith('/') ? path : '/$path';
+    return Uri.parse('$_baseUrl$normalized');
+  }
 
   Future<Map<String, dynamic>> health() async {
-    final res = await http.get(Uri.parse('$baseUrl/api/health'));
+    final res = await http.get(_uri('/api/health'));
     if (res.statusCode != 200) throw Exception('Health check failed: $res.statusCode');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<OmnicontrolDevice>> fetchDevices() async {
-    final res = await http.get(Uri.parse('$baseUrl/api/devices'));
+    final res = await http.get(_uri('/api/devices'));
     if (res.statusCode != 200) throw Exception('Failed to load devices');
     final body = jsonDecode(res.body);
     List<dynamic> jsonList;
@@ -33,11 +49,11 @@ class ApiClient {
 
   Future<void> scan() async {
     try {
-      final res = await http.post(Uri.parse('$baseUrl/api/scan'));
-        if (res.statusCode != 200) {
-          final body = res.body;
-          throw Exception('Scan failed: ${res.statusCode} $body');
-        }
+      final res = await http.post(_uri('/api/scan'));
+      if (res.statusCode != 200) {
+        final body = res.body;
+        throw Exception('Scan failed: ${res.statusCode} $body');
+      }
     } catch (e) {
       throw Exception('Scan request error: $e');
     }
@@ -117,7 +133,7 @@ class ApiClient {
 
   Future<void> toggle(String id) async {
     try {
-      final res = await http.post(Uri.parse('$baseUrl/api/devices/$id/toggle'));
+      final res = await http.post(_uri('/api/devices/$id/toggle'));
       if (res.statusCode != 200) throw Exception('Toggle failed: ${res.statusCode} ${res.body}');
     } catch (e) {
       // rethrow with context for UI
@@ -127,7 +143,7 @@ class ApiClient {
 
   Future<void> ping(String id) async {
     try {
-      final res = await http.post(Uri.parse('$baseUrl/api/devices/$id/ping'));
+      final res = await http.post(_uri('/api/devices/$id/ping'));
       if (res.statusCode != 200) throw Exception('Ping failed: ${res.statusCode} ${res.body}');
     } catch (e) {
       throw Exception('Ping request error: $e');
@@ -136,7 +152,7 @@ class ApiClient {
 
   /// Start a pairing job on the hub and poll for completion.
   Future<String> pair(Map<String, dynamic> payload) async {
-    final res = await http.post(Uri.parse('$baseUrl/api/pairings/jobs'), body: jsonEncode(payload), headers: {'Content-Type': 'application/json'});
+    final res = await http.post(_uri('/api/pairings/jobs'), body: jsonEncode(payload), headers: {'Content-Type': 'application/json'});
     if (res.statusCode >= 400) throw Exception('Pairing job start failed: ${res.body}');
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final jobId = body['job_id'] as String?;
@@ -145,19 +161,19 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> getPairJobStatus(String jobId) async {
-    final res = await http.get(Uri.parse('$baseUrl/api/pairings/jobs/$jobId'));
+    final res = await http.get(_uri('/api/pairings/jobs/$jobId'));
     if (res.statusCode != 200) throw Exception('Failed to get pairing job status: ${res.body}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<void> sendCommand(String id, Map<String, dynamic> body) async {
-    final res = await http.post(Uri.parse('$baseUrl/api/devices/$id/command'), body: jsonEncode(body), headers: {'Content-Type': 'application/json'});
+    final res = await http.post(_uri('/api/devices/$id/command'), body: jsonEncode(body), headers: {'Content-Type': 'application/json'});
     if (res.statusCode >= 400) throw Exception('Command failed: ${res.body}');
   }
 
   // Media control helpers (calls to backend media endpoints)
   Future<void> mediaAction(String id, String action) async {
-    final res = await http.post(Uri.parse('$baseUrl/api/devices/$id/media/$action'));
+    final res = await http.post(_uri('/api/devices/$id/media/$action'));
     if (res.statusCode >= 400) throw Exception('Media action failed: ${res.body}');
   }
 
@@ -168,20 +184,20 @@ class ApiClient {
 
   // Auth / account linking (placeholder endpoints)
   Future<void> linkHubToAccount(String hubUrl, String token) async {
-    final res = await http.post(Uri.parse('$baseUrl/api/account/link'), body: jsonEncode({'hub': hubUrl, 'token': token}), headers: {'Content-Type': 'application/json'});
+    final res = await http.post(_uri('/api/account/link'), body: jsonEncode({'hub': hubUrl, 'token': token}), headers: {'Content-Type': 'application/json'});
     if (res.statusCode >= 400) throw Exception('Link hub failed: ${res.body}');
   }
 
   // Firmware check
   Future<Map<String, dynamic>> checkFirmware() async {
-    final res = await http.get(Uri.parse('$baseUrl/api/updates/latest'));
+    final res = await http.get(_uri('/api/updates/latest'));
     if (res.statusCode != 200) throw Exception('Firmware check failed: ${res.body}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<bool> connectDevice(String id) async {
     try {
-      final res = await http.post(Uri.parse('$baseUrl/api/devices/$id/connect'));
+      final res = await http.post(_uri('/api/devices/$id/connect'));
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as Map<String, dynamic>;
         return body['connected'] == true;
@@ -193,13 +209,46 @@ class ApiClient {
   }
 
   Future<void> postDeviceMetadata(String id, Map<String, dynamic> metadata) async {
-    final res = await http.post(Uri.parse('$baseUrl/api/devices/$id/metadata'), body: jsonEncode(metadata), headers: {'Content-Type':'application/json'});
+    final res = await http.post(_uri('/api/devices/$id/metadata'), body: jsonEncode(metadata), headers: {'Content-Type':'application/json'});
     if (res.statusCode >= 400) throw Exception('Failed to update metadata: ${res.body}');
   }
 
   Future<Map<String, dynamic>> getStreamInfo(String id) async {
-    final res = await http.get(Uri.parse('$baseUrl/api/devices/$id/stream_info'));
+    final res = await http.get(_uri('/api/devices/$id/stream_info'));
     if (res.statusCode != 200) throw Exception('Failed to get stream info: ${res.body}');
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> registerCamera({
+    required String id,
+    required String name,
+    required String ip,
+    required String username,
+    required String password,
+    String path = 'stream1',
+  }) async {
+    final encodedPass = Uri.encodeComponent(password);
+    final payload = {
+      'id': id,
+      'name': name,
+      'ip': ip,
+      'type': 'Camera',
+      'metadata': {
+        'rtsp_url': 'rtsp://$username:$encodedPass@$ip:554/$path',
+        'snapshot_auth': {
+          'user': username,
+          'pass': password,
+        },
+      },
+    };
+
+    final res = await http.post(
+      _uri('/api/tapo/devices'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+    if (res.statusCode >= 400) {
+      throw Exception('Camera registration failed: ${res.body}');
+    }
   }
 }
