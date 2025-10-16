@@ -665,6 +665,10 @@ class DeviceManager:
                 result["service_uuid"] = normalized["service_uuid"]
             if normalized.get("service_name"):
                 result["service_name"] = normalized["service_name"]
+            if payload_len:
+                result["payload_hex"] = normalized.get("payload_hex") or normalized.get("payload_ascii", "").encode("utf-8").hex()
+            if normalized.get("response_bytes") is not None:
+                result["response_expected"] = normalized.get("response_bytes")
         if response_payload:
             result["response_hex"] = response_payload.hex()
             result["response_len"] = len(response_payload)
