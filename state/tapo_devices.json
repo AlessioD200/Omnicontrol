@@ -1,0 +1,18 @@
+{
+  "devices": [
+    {
+      "id": "c200",
+      "name": "Tapo C200",
+      "ip": "192.168.0.236",
+      "mac": "EC-75-0C-CB-F8-9D",
+      "type": "Camera",
+      "metadata": {
+  "rtsp_url": "rtsp://alessio:DPRales1420069%40%26@192.168.0.236:554/stream1",
+        "snapshot_auth": {
+          "user": "alessio",
+          "pass": "DPRales1420069@&"
+        }
+      }
+    }
+  ]
+}

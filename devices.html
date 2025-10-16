@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style/style.css">
+    <title>Omnicontrol - devices</title>
+</head>
+<body data-page="devices">
+    <header>
+        <div class="container top-bar">
+            <a class="brand" href="index.html">Omnicontrol</a>
+            <nav class="nav-links">
+                <a class="nav-link" data-nav="home" href="index.html">Home</a>
+                <a class="nav-link" data-nav="devices" href="devices.html">Devices</a>
+                <a class="nav-link" data-nav="settings" href="settings.html">Settings</a>
+                <a class="nav-link" data-nav="updates" href="update.html">Updates</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="container main-content">
+            <section class="card">
+                <div class="device-toolbar">
+                    <div class="device-toolbar__intro">
+                        <h1 class="section-title">Connected Devices</h1>
+                        <p class="section-subtitle">Pair, monitor, and control every screen and accessory from here.</p>
+                    </div>
+                    <div class="device-toolbar__actions">
+                        <input class="input" type="search" data-device-filter placeholder="Filter by name, room, or protocol" aria-label="Filter devices">
+                        <button class="btn secondary" type="button" data-device-discover>Scan for new devices</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="device-grid" data-device-list>
+                    <p>No devices found. Start a scan to discover Bluetooth or HomeKit equipment.</p>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Map Bluetooth Controls</h2>
+                <p class="section-subtitle">Pick a discovered device, assign friendly details, and wire the command characteristics you already know from your TV&rsquo;s protocol sheet.</p>
+                <form class="pairing-form" data-pair-form>
+                    <div class="form-grid two-columns">
+                        <label>
+                            Device address (MAC)
+                            <input class="input" type="text" name="address" list="known-addresses" data-pair-address placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" required>
+                        </label>
+                        <label>
+                            Device ID (optional)
+                            <input class="input" type="text" name="deviceId" placeholder="ble-livingroom-tv">
+                        </label>
+                        <label>
+                            Friendly name
+                            <input class="input" type="text" name="name" placeholder="Living room TV">
+                        </label>
+                        <label>
+                            Room
+                            <input class="input" type="text" name="room" placeholder="Living room">
+                        </label>
+                        <label>
+                            Device type
+                            <input class="input" type="text" name="type" placeholder="Display">
+                        </label>
+                    </div>
+
+                    <div class="command-grid">
+                        <h3>Command bindings</h3>
+                        <p class="form-note">Fill in the characteristic UUID for each action your TV understands. Payloads are hex (optional). Leave blank to skip.</p>
+                        <div class="command-list">
+                            <div class="command-row" data-command="power_on">
+                                <div>
+                                    <strong>Power On</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-power_on-char" placeholder="0000fff1-...">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-power_on-payload" placeholder="01">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-power_on-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="power_off">
+                                <div>
+                                    <strong>Power Off</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-power_off-char" placeholder="0000fff1-...">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-power_off-payload" placeholder="00">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-power_off-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="power_toggle">
+                                <div>
+                                    <strong>Power Toggle</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-power_toggle-char" placeholder="0000fff1-...">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-power_toggle-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-power_toggle-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="volume_up">
+                                <div>
+                                    <strong>Volume +</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-volume_up-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-volume_up-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-volume_up-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="volume_down">
+                                <div>
+                                    <strong>Volume -</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-volume_down-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-volume_down-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-volume_down-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="channel_up">
+                                <div>
+                                    <strong>Channel +</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-channel_up-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-channel_up-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-channel_up-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="channel_down">
+                                <div>
+                                    <strong>Channel -</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-channel_down-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-channel_down-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-channel_down-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="nav_up">
+                                <div>
+                                    <strong>Navigate Up</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-nav_up-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-nav_up-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-nav_up-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="nav_down">
+                                <div>
+                                    <strong>Navigate Down</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-nav_down-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-nav_down-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-nav_down-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="nav_left">
+                                <div>
+                                    <strong>Navigate Left</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-nav_left-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-nav_left-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-nav_left-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="nav_right">
+                                <div>
+                                    <strong>Navigate Right</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-nav_right-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-nav_right-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-nav_right-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="command-row" data-command="nav_select">
+                                <div>
+                                    <strong>Select / OK</strong>
+                                    <label>
+                                        Characteristic UUID
+                                        <input class="input" type="text" name="command-nav_select-char" placeholder="">
+                                    </label>
+                                </div>
+                                <div>
+                                    <label>
+                                        Payload (hex, optional)
+                                        <input class="input" type="text" name="command-nav_select-payload" placeholder="">
+                                    </label>
+                                    <label class="checkbox">
+                                        <input type="checkbox" name="command-nav_select-ack"> Wait for ACK
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pairing-actions">
+                        <button class="btn" type="submit">Save pairing</button>
+                        <p class="form-note" data-pair-feedback></p>
+                    </div>
+                </form>
+                <datalist id="known-addresses" data-pair-addresses></datalist>
+            </section>
+
+            <section class="grid two">
+                <article class="card" data-device-insights>
+                    <h2>Device Insights</h2>
+                    <div class="metrics">
+                        <div>
+                            <strong>--</strong>
+                            <span>online devices</span>
+                        </div>
+                        <div>
+                            <strong>--</strong>
+                            <span>HomeKit accessories</span>
+                        </div>
+                        <div>
+                            <strong>--</strong>
+                            <span>legacy IR profiles ready</span>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="card">
+                    <h2>Onboarding Checklist</h2>
+                    <div class="list">
+                        <span>1. Keep Raspberry Pi hub discoverable over Bluetooth LE.</span>
+                        <span>2. For IR targets, connect your USB IR blaster and record remote codes.</span>
+                        <span>3. Link Apple HomeKit by generating a pairing code within the Settings page.</span>
+                        <span>4. Assign rooms and scenes to orchestrate multisystem automations.</span>
+                    </div>
+                </article>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Omnicontrol. Built for seamless home control.</p>
+        </div>
+    </footer>
+
+    <script src="script/app.js"></script>
+</body>
+</html>

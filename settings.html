@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style/style.css">
+    <title>Omnicontrol - settings</title>
+</head>
+<body data-page="settings">
+    <header>
+        <div class="container top-bar">
+            <a class="brand" href="index.html">Omnicontrol</a>
+            <nav class="nav-links">
+                <a class="nav-link" data-nav="home" href="index.html">Home</a>
+                <a class="nav-link" data-nav="devices" href="devices.html">Devices</a>
+                <a class="nav-link" data-nav="settings" href="settings.html">Settings</a>
+                <a class="nav-link" data-nav="updates" href="update.html">Updates</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="container main-content">
+            <section class="card">
+                <span class="badge">Hub Preferences</span>
+                <h1 class="section-title">Tune your Omnicontrol hub</h1>
+                <p class="section-subtitle">Update identity, connectivity, and integrations. Changes persist locally for now and will sync to the Pi services once the backend is connected.</p>
+            </section>
+
+            <section class="card">
+                <form class="form-grid" data-settings-form>
+                    <div class="form-grid two-columns">
+                        <label>
+                            Hub name
+                            <input class="input" type="text" name="hubName" placeholder="Living Lab Hub" required>
+                        </label>
+                        <label>
+                            Location / room
+                            <input class="input" type="text" name="room" placeholder="Main Office">
+                        </label>
+                        <label>
+                            Network SSID
+                            <input class="input" type="text" name="networkSsid" placeholder="Omnicontrol Mesh" required>
+                        </label>
+                        <label>
+                            HomeKit bridge code
+                            <input class="input" type="text" name="homekitCode" placeholder="XXX-XX-XXX" pattern="[0-9A-Z-]{9}">
+                        </label>
+                    </div>
+
+                    <label class="switch">
+                        Auto-update firmware
+                        <input type="checkbox" name="autoUpdate">
+                    </label>
+                    <label class="switch">
+                        Allow remote access via mobile app
+                        <input type="checkbox" name="remoteAccess">
+                    </label>
+
+                    <div class="form-grid two-columns">
+                        <label>
+                            Default scene on start
+                            <select class="input" name="defaultScene">
+                                <option value="evening">Evening ambiance</option>
+                                <option value="work">Productivity</option>
+                                <option value="movie">Movie night</option>
+                                <option value="custom">Custom profile</option>
+                            </select>
+                        </label>
+                        <label>
+                            Camera retention (days)
+                            <input class="input" type="number" name="cameraRetention" min="1" max="30" value="7">
+                        </label>
+                    </div>
+
+                    <button class="btn" type="submit">Save preferences</button>
+                    <p class="form-feedback" data-settings-feedback>Values stored locally. Connect backend services to sync with the Raspberry Pi hub.</p>
+                </form>
+            </section>
+
+            <section class="grid two">
+                <article class="card">
+                    <h2>Integration Targets</h2>
+                    <ul class="list">
+                        <li>Bluetooth displays (Samsung, LG, Sony)</li>
+                        <li>Infrared receivers via USB IR blaster</li>
+                        <li>Apple HomeKit lights, plugs, and scenes</li>
+                        <li>Zigbee or Z-Wave domotica bridges (future)</li>
+                    </ul>
+                </article>
+
+                <article class="card">
+                    <h2>Security Checklist</h2>
+                    <ul class="list">
+                        <li>Rotate HomeKit bridge codes every 90 days.</li>
+                        <li>Enable remote access only behind VPN or WireGuard.</li>
+                        <li>Back up Omnicontrol configuration via `scp` to NAS.</li>
+                        <li>Stay on the stable firmware channel unless testing new features.</li>
+                    </ul>
+                </article>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Omnicontrol. Built for seamless home control.</p>
+        </div>
+    </footer>
+
+    <script src="script/app.js"></script>
+</body>
+</html>

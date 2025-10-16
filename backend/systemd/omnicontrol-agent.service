@@ -1,0 +1,14 @@
+[Unit]
+Description=Omnicontrol BlueZ agent runner
+After=bluetooth.service
+
+[Service]
+User=omnicontrol
+Group=omnicontrol
+WorkingDirectory=/home/omnicontrol/Omnicontrol/backend
+Environment="PATH=/home/omnicontrol/Omnicontrol/backend/.venv/bin"
+ExecStart=/home/omnicontrol/Omnicontrol/backend/.venv/bin/python run_agent.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

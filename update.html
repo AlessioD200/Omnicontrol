@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style/style.css">
+    <title>Omnicontrol - Updates</title>
+</head>
+<body data-page="updates">
+    <header>
+        <div class="container top-bar">
+            <a class="brand" href="index.html">Omnicontrol</a>
+            <nav class="nav-links">
+                <a class="nav-link" data-nav="home" href="index.html">Home</a>
+                <a class="nav-link" data-nav="devices" href="devices.html">Devices</a>
+                <a class="nav-link" data-nav="settings" href="settings.html">Settings</a>
+                <a class="nav-link" data-nav="updates" href="update.html">Updates</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="container main-content">
+            <section class="card">
+                <span class="badge">Firmware</span>
+                <h1 class="section-title">Stay current with over-the-air updates</h1>
+                <p class="section-subtitle">Deploy new Omnicontrol builds, sync HomeKit profiles, and distribute IR libraries without touching the Raspberry Pi manually.</p>
+            </section>
+
+            <section class="card">
+                <form class="form-grid" data-update-form>
+                    <label>
+                        Select firmware package
+                        <input class="input" type="file" name="firmware" accept=".tar,.zip,.img" required>
+                    </label>
+                    <label>
+                        Release notes / context
+                        <textarea class="input" name="notes" rows="4" placeholder="Document key changes before rollout..."></textarea>
+                    </label>
+                    <button class="btn" type="submit">Upload &amp; stage update</button>
+                    <p class="form-feedback" data-update-feedback>Uploads are staged locally until the deployment agent is connected.</p>
+                </form>
+            </section>
+
+            <section class="grid two">
+                <article class="card">
+                    <h2>Release Channels</h2>
+                    <div class="release-channel">
+                        <strong>Stable</strong>
+                        <p>Production builds verified for HomeKit certification and IR library compatibility.</p>
+                    </div>
+                    <div class="release-channel">
+                        <strong>Preview</strong>
+                        <p>Early access to new Bluetooth profiles, REST endpoints, and UI features.</p>
+                    </div>
+                    <div class="release-channel">
+                        <strong>Developer</strong>
+                        <p>Nightly builds with diagnostic logging and experimental domotica adapters.</p>
+                    </div>
+                </article>
+
+                <article class="card">
+                    <h2>Update Timeline</h2>
+                    <div class="timeline" data-update-history>
+                        <div class="timeline-item">
+                            <strong>1.0.0</strong>
+                            <span>Initial public release – Bluetooth display control + dashboard.</span>
+                        </div>
+                        <div class="timeline-item">
+                            <strong>0.9.5-beta</strong>
+                            <span>Added HomeKit bridge discovery and IR recording helpers.</span>
+                        </div>
+                    </div>
+                </article>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Omnicontrol. Built for seamless home control.</p>
+        </div>
+    </footer>
+
+    <script src="script/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+fastapi
+pydantic
+uvicorn[standard]
+aiofiles
+python-multipart
+bleak
+zeroconf
+aiohomekit
+dbus-next

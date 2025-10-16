@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style/style.css">
+    <title>Omnicontrol</title>
+</head>
+<body data-page="home">
+    <header>
+        <div class="container top-bar">
+            <a class="brand" href="index.html">Omnicontrol</a>
+            <nav class="nav-links">
+                <a class="nav-link" data-nav="home" href="index.html">Home</a>
+                <a class="nav-link" data-nav="devices" href="devices.html">Devices</a>
+                <a class="nav-link" data-nav="settings" href="settings.html">Settings</a>
+                <a class="nav-link" data-nav="updates" href="update.html">Updates</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="container main-content">
+            <section class="card hero">
+                <span class="badge ok">Hub Online</span>
+                <h1>Take command of every room with Omnicontrol.</h1>
+                <p>Centralize Bluetooth displays, prepare infrared fallbacks, and orchestrate HomeKit lighting or camera feeds from one secure Raspberry Pi hub. This dashboard gives you a live snapshot and fast actions while the mobile app mirrors the experience.</p>
+                <div class="cta-group">
+                    <a class="btn" href="devices.html">View Devices</a>
+                    <a class="btn secondary" href="settings.html">Adjust Settings</a>
+                </div>
+            </section>
+
+            <section class="grid two">
+                <article class="card" data-quick-stats>
+                    <h2>System Snapshot</h2>
+                    <p>Loading hub stats...</p>
+                </article>
+
+                <article class="card">
+                    <h2>Roadmap Highlights</h2>
+                    <ul class="list">
+                        <li>Pair and control TVs, monitors, and projectors over Bluetooth Low Energy.</li>
+                        <li>Use IR blasters for legacy displays that lack wireless connectivity.</li>
+                        <li>Bring Apple HomeKit accessories into a single scene orchestration layer.</li>
+                        <li>Aggregate camera feeds and domotica triggers for at-a-glance awareness.</li>
+                    </ul>
+                </article>
+            </section>
+
+            <section class="card">
+                <h2>Latest Activity</h2>
+                <div class="timeline" data-activity-log>
+                    <div class="timeline-item">
+                        <strong>Firmware 1.0.0 deployed</strong>
+                        <span>Baseline OS and Omnicontrol services baked into hub image.</span>
+                    </div>
+                    <div class="timeline-item">
+                        <strong>Bluetooth pairing wizard</strong>
+                        <span>Initial device onboarding tested with Samsung Frame TV and LG monitor.</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Omnicontrol. Built for seamless home control.</p>
+        </div>
+    </footer>
+
+    <script src="script/app.js"></script>
+</body>
+</html>
