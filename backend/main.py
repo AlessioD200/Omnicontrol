@@ -139,11 +139,18 @@ async def trigger_scan() -> Dict[str, object]:
 
 class CommandSpec(BaseModel):
     id: str
-    characteristic: str
     label: Optional[str] = None
+    transport: str = Field(default="ble")
+    characteristic: Optional[str] = None
     payload_hex: Optional[str] = None
     payload_ascii: Optional[str] = None
     with_response: bool = False
+    rfcomm_channel: Optional[int] = Field(default=None, ge=1, le=30)
+    service_uuid: Optional[str] = None
+    service_name: Optional[str] = None
+    response_bytes: Optional[int] = Field(default=None, ge=0)
+    response_timeout: Optional[float] = Field(default=None, ge=0.0)
+    wait_ms: Optional[int] = Field(default=None, ge=0)
 
 
 class PairRequest(BaseModel):
@@ -157,6 +164,14 @@ class PairRequest(BaseModel):
 
 class CommandRequest(BaseModel):
     command: str
+
+
+class InlineCommandSpec(CommandSpec):
+    id: Optional[str] = None
+
+
+class InlineCommandRequest(BaseModel):
+    command: InlineCommandSpec
 
 
 @app.post("/api/pairings")
@@ -221,6 +236,20 @@ async def send_command(device_id: str, payload: CommandRequest) -> Dict[str, obj
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return updated.to_dict()
+
+
+@app.post("/api/devices/{device_id}/command-inline")
+async def send_inline_command(device_id: str, payload: InlineCommandRequest) -> Dict[str, object]:
+    device = await manager.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Unknown device")
+    try:
+        result = await manager.execute_inline_command(device_id, payload.command.dict(exclude_none=True))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return result
 
 
 @app.post('/api/devices/{device_id}/connect')

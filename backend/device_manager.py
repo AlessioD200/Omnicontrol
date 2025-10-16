@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from controllers import BluetoothController, HomeKitController, TapoController
+import classic_rfcomm
 import logging
 
 STATE_VERSION = 1
@@ -318,13 +319,25 @@ class DeviceManager:
                 raise ValueError("Bluetooth device missing address")
             target_state = device.status != "online"
             characteristic = device.metadata.get("ble_power_char") or None
-            result = await self.bluetooth.toggle_power(
-                device.address,
-                characteristic=characteristic,
-                turn_on=target_state,
-            )
+            command_map = self._command_map(device)
+            power_commands = {key: command_map[key] for key in command_map if key.startswith("power_")}
+            if power_commands:
+                result = await self._toggle_with_commands(
+                    device,
+                    command_map,
+                    target_state,
+                    now,
+                )
+            else:
+                result = await self.bluetooth.toggle_power(
+                    device.address,
+                    characteristic=characteristic,
+                    turn_on=target_state,
+                )
+                metadata = device.metadata or {}
+                metadata["last_toggle"] = now
+                device.metadata = metadata
             device.status = "online" if result else "offline"
-            device.metadata["last_toggle"] = now
         elif "homekit" in device.protocols:
             pairing_id = device.metadata.get("pairing_id")
             aid = device.metadata.get("aid")
@@ -504,13 +517,21 @@ class DeviceManager:
                 media_caps["audio_sink"] = "audio_sink" in classic_profiles
                 media_caps["handsfree"] = "handsfree_gateway" in classic_profiles or "headset_gateway" in classic_profiles
 
+        ble_commands = [cmd for cmd in normalized_commands if (cmd.get("transport") or "ble").lower() != "rfcomm"]
+        classic_commands = [cmd for cmd in normalized_commands if (cmd.get("transport") or "ble").lower() == "rfcomm"]
+        if ble_commands:
+            metadata["ble_commands"] = ble_commands
+        elif "ble_commands" not in metadata:
+            metadata["ble_commands"] = []
+        if classic_commands:
+            metadata["classic_commands"] = classic_commands
+
         metadata.update(
             {
                 "paired": True,
                 "paired_at": metadata.get("paired_at", datetime.utcnow().isoformat()),
                 "trusted": metadata.get("trusted", False),
                 "trusted_at": metadata.get("trusted_at"),
-                "ble_commands": normalized_commands,
             }
         )
         device.metadata = metadata
@@ -575,16 +596,19 @@ class DeviceManager:
         if not device.address:
             raise ValueError("Bluetooth device missing address")
 
-        command_map = self._ble_command_map(device)
+        command_map = self._command_map(device)
         command = command_map.get(command_id)
         if not command:
             raise ValueError(f"Command '{command_id}' not configured for {device.name}")
 
-        await self._perform_ble_command(device, command)
+        response_payload = await self._execute_command(device, command)
 
         now = datetime.utcnow().isoformat()
         metadata = device.metadata or {}
-        metadata["last_command"] = {"id": command_id, "at": now}
+        last_entry = {"id": command_id, "at": now, "transport": command.get("transport", "ble")}
+        if response_payload:
+            last_entry["response_hex"] = response_payload.hex()
+        metadata["last_command"] = last_entry
         command_id_lower = command_id.lower()
         if command_id_lower == "power_off":
             metadata["is_on"] = False
@@ -604,6 +628,47 @@ class DeviceManager:
 
         await self._persist_devices()
         return device
+
+    async def execute_inline_command(self, device_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        device = self.devices.get(device_id)
+        if not device:
+            raise ValueError("Unknown device")
+        if "bluetooth" not in device.protocols:
+            raise ValueError("Device does not support Bluetooth commands")
+        if not device.address:
+            raise ValueError("Bluetooth device missing address")
+
+        inline_spec = dict(payload)
+        inline_spec["id"] = inline_spec.get("id") or "__inline__"
+        try:
+            normalized = self._normalize_command_spec(inline_spec)
+        except ValueError as exc:
+            raise ValueError(f"Invalid command specification: {exc}") from exc
+
+        payload_len = 0
+        if normalized.get("payload_hex"):
+            payload_len = len(self._decode_payload_hex(normalized.get("payload_hex", "")))
+        elif isinstance(normalized.get("payload_ascii"), str) and normalized.get("payload_ascii"):
+            payload_len = len(normalized["payload_ascii"].encode("utf-8"))
+
+        response_payload = await self._execute_command(device, normalized)
+
+        result: Dict[str, Any] = {
+            "device": device_id,
+            "transport": normalized.get("transport", "ble"),
+            "bytes_sent": payload_len,
+        }
+        if normalized.get("transport") == "rfcomm":
+            if normalized.get("rfcomm_channel") is not None:
+                result["rfcomm_channel"] = normalized["rfcomm_channel"]
+            if normalized.get("service_uuid"):
+                result["service_uuid"] = normalized["service_uuid"]
+            if normalized.get("service_name"):
+                result["service_name"] = normalized["service_name"]
+        if response_payload:
+            result["response_hex"] = response_payload.hex()
+            result["response_len"] = len(response_payload)
+        return result
 
     async def update_settings(self, settings: Dict[str, object]) -> Dict[str, object]:
         self._settings_path.write_text(json.dumps(settings, indent=2))
@@ -673,9 +738,9 @@ class DeviceManager:
         command_id = str(raw.get("id") or "").strip()
         if not command_id:
             raise ValueError("Command id missing")
-        characteristic = str(raw.get("characteristic") or "").strip().lower()
-        if not characteristic:
-            raise ValueError("Characteristic missing for command")
+        transport = str(raw.get("transport") or raw.get("protocol") or "ble").strip().lower()
+        if transport not in {"ble", "rfcomm"}:
+            raise ValueError("Unsupported command transport")
         payload_hex_raw = raw.get("payload_hex")
         payload_ascii_raw = raw.get("payload_ascii")
         payload_hex = str(payload_hex_raw).strip() if payload_hex_raw else ""
@@ -687,9 +752,60 @@ class DeviceManager:
         spec: Dict[str, Any] = {
             "id": command_id,
             "label": label,
-            "characteristic": characteristic,
-            "with_response": bool(raw.get("with_response", False)),
+            "transport": transport,
         }
+        if transport == "ble":
+            characteristic = str(raw.get("characteristic") or "").strip().lower()
+            if not characteristic:
+                raise ValueError("Characteristic missing for BLE command")
+            spec["characteristic"] = characteristic
+            spec["with_response"] = bool(raw.get("with_response", False))
+        else:
+            channel_raw = raw.get("rfcomm_channel")
+            channel_val: Optional[int] = None
+            if channel_raw is not None and str(channel_raw).strip():
+                try:
+                    channel_val = int(str(channel_raw).strip())
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("rfcomm_channel must be an integer") from exc
+                if channel_val <= 0 or channel_val > 30:
+                    raise ValueError("rfcomm_channel must be between 1 and 30")
+                spec["rfcomm_channel"] = channel_val
+            service_uuid = str(raw.get("service_uuid") or "").strip().lower()
+            if service_uuid:
+                spec["service_uuid"] = service_uuid
+            service_name = str(raw.get("service_name") or "").strip()
+            if service_name:
+                spec["service_name"] = service_name
+            response_bytes = raw.get("response_bytes")
+            if response_bytes is not None and str(response_bytes).strip() != "":
+                try:
+                    response_int = int(response_bytes)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("response_bytes must be an integer") from exc
+                if response_int < 0:
+                    raise ValueError("response_bytes must be >= 0")
+                spec["response_bytes"] = response_int
+            response_timeout = raw.get("response_timeout")
+            if response_timeout is not None and str(response_timeout).strip() != "":
+                try:
+                    timeout_val = float(response_timeout)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("response_timeout must be numeric") from exc
+                if timeout_val < 0:
+                    raise ValueError("response_timeout must be >= 0")
+                spec["response_timeout"] = timeout_val
+            wait_ms = raw.get("wait_ms")
+            if wait_ms is not None and str(wait_ms).strip() != "":
+                try:
+                    wait_int = int(wait_ms)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("wait_ms must be an integer") from exc
+                if wait_int < 0:
+                    raise ValueError("wait_ms must be >= 0")
+                spec["wait_ms"] = wait_int
+            if "rfcomm_channel" not in spec and "service_uuid" not in spec and "service_name" not in spec:
+                raise ValueError("RFCOMM command requires rfcomm_channel, service_uuid, or service_name")
         if payload_hex:
             spec["payload_hex"] = payload_hex
         elif isinstance(payload_ascii_raw, str) and payload_ascii_raw:
@@ -698,23 +814,37 @@ class DeviceManager:
             spec["payload_hex"] = ""
         return spec
 
-    def _ble_command_map(self, device: Device) -> Dict[str, Dict[str, Any]]:
+    def _command_map(self, device: Device) -> Dict[str, Dict[str, Any]]:
         metadata = device.metadata or {}
-        commands = metadata.get("ble_commands")
         result: Dict[str, Dict[str, Any]] = {}
-        if isinstance(commands, list):
-            for entry in commands:
+
+        def _ingest(entries: Any) -> None:
+            if not isinstance(entries, list):
+                return
+            for entry in entries:
                 if not isinstance(entry, dict):
                     continue
                 command_id = str(entry.get("id") or "").strip()
                 if not command_id:
                     continue
-                result[command_id] = entry
+                normalized = dict(entry)
+                transport = str(normalized.get("transport") or "ble").lower()
+                if transport not in {"ble", "rfcomm"}:
+                    transport = "ble"
+                normalized["transport"] = transport
+                if transport == "rfcomm" and normalized.get("rfcomm_channel") is not None:
+                    try:
+                        normalized["rfcomm_channel"] = int(normalized["rfcomm_channel"])
+                    except (TypeError, ValueError):
+                        normalized.pop("rfcomm_channel", None)
+                result[command_id] = normalized
 
-        # Support a mapping of logical actions -> command ids (written by the mobile UI)
-        # metadata['ble_commands_map'] example: {"up": "cmd_up_id", "vol_up": "cmd_vol_plus"}
-        mapping = metadata.get("ble_commands_map")
-        if isinstance(mapping, dict):
+        _ingest(metadata.get("ble_commands"))
+        _ingest(metadata.get("classic_commands"))
+
+        def _apply_mapping(mapping: Any) -> None:
+            if not isinstance(mapping, dict):
+                return
             for logical_action, cmdid in mapping.items():
                 try:
                     cid = str(cmdid or "").strip()
@@ -722,12 +852,15 @@ class DeviceManager:
                     continue
                 if not cid:
                     continue
-                # If the underlying command exists in result (from ble_commands), map logical_action -> that spec
                 if cid in result:
                     result[logical_action] = result[cid]
+
+        _apply_mapping(metadata.get("ble_commands_map"))
+        _apply_mapping(metadata.get("command_map"))
+
         return result
 
-    async def _perform_ble_command(self, device: Device, command: Dict[str, Any]) -> None:
+    async def _perform_ble_command(self, device: Device, command: Dict[str, Any]) -> bytes:
         if not device.address:
             raise ValueError("Bluetooth device missing address")
         characteristic = str(command.get("characteristic") or "").strip()
@@ -751,6 +884,7 @@ class DeviceManager:
             payload=payload,
             with_response=with_response,
         )
+        return b""
 
     def _decode_payload_hex(self, payload_hex: str) -> bytes:
         cleaned = payload_hex.replace("0x", "")
@@ -762,6 +896,129 @@ class DeviceManager:
         except ValueError as error:
             raise ValueError("Invalid hex payload") from error
 
+    async def _execute_command(self, device: Device, command: Dict[str, Any]) -> bytes:
+        transport = str(command.get("transport") or "ble").lower()
+        if transport == "rfcomm":
+            return await self._perform_rfcomm_command(device, command)
+        return await self._perform_ble_command(device, command)
+
+    async def _perform_rfcomm_command(self, device: Device, command: Dict[str, Any]) -> bytes:
+        if not device.address:
+            raise ValueError("Bluetooth device missing address")
+        channel = command.get("rfcomm_channel")
+        service_uuid = str(command.get("service_uuid") or "").strip()
+        service_name = str(command.get("service_name") or "").strip()
+
+        channel_id: Optional[int] = None
+        if channel is not None:
+            try:
+                channel_id = int(channel)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("rfcomm_channel must be an integer") from exc
+            if channel_id <= 0 or channel_id > 30:
+                raise ValueError("rfcomm_channel must be between 1 and 30")
+
+        lookup_target = service_uuid or service_name
+        if channel_id is None and lookup_target:
+            resolved = self._resolve_rfcomm_channel(device, lookup_target)
+            if resolved is not None:
+                channel_id = resolved
+                command["rfcomm_channel"] = channel_id
+
+        if channel_id is None:
+            raise ValueError("RFCOMM command missing channel; supply rfcomm_channel or service reference")
+
+        payload_hex = str(command.get("payload_hex") or "").strip()
+        payload_ascii = command.get("payload_ascii")
+        if payload_hex:
+            payload = self._decode_payload_hex(payload_hex)
+        elif isinstance(payload_ascii, str) and payload_ascii:
+            payload = payload_ascii.encode("utf-8")
+        else:
+            payload = b""
+
+        response_bytes = command.get("response_bytes")
+        if response_bytes is None:
+            expected_response = 0
+        else:
+            try:
+                expected_response = int(response_bytes)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("response_bytes must be an integer") from exc
+            if expected_response < 0:
+                raise ValueError("response_bytes must be >= 0")
+
+        response_timeout = command.get("response_timeout")
+        if response_timeout is None:
+            response_timeout_val = 1.0
+        else:
+            try:
+                response_timeout_val = float(response_timeout)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("response_timeout must be numeric") from exc
+            if response_timeout_val < 0:
+                response_timeout_val = 0.0
+
+        wait_ms = command.get("wait_ms")
+        wait_seconds = 0.0
+        if wait_ms is not None:
+            try:
+                wait_seconds = max(0.0, float(wait_ms) / 1000.0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("wait_ms must be numeric") from exc
+
+        try:
+            return await asyncio.to_thread(
+                classic_rfcomm.send_command,
+                device.address,
+                channel_id,
+                payload,
+                connect_timeout=5.0,
+                response_bytes=expected_response,
+                response_timeout=response_timeout_val,
+                wait_time=wait_seconds,
+            )
+        except classic_rfcomm.RFCOMMError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    def _resolve_rfcomm_channel(self, device: Device, identifier: str) -> Optional[int]:
+        capabilities = device.capabilities or {}
+        classic = capabilities.get("classic") or {}
+        channels = classic.get("rfcomm_channels") or {}
+        ident = identifier.strip().lower()
+        if not ident:
+            return None
+        if ident in channels:
+            try:
+                return int(channels[ident])
+            except (TypeError, ValueError):
+                return None
+        services = classic.get("services") or []
+        for service in services:
+            channel = service.get("rfcomm_channel")
+            if channel is None:
+                continue
+            try:
+                channel_int = int(channel)
+            except (TypeError, ValueError):
+                continue
+            name = str(service.get("name") or "").strip().lower()
+            if name and (ident == name or ident in name):
+                return channel_int
+            provider = str(service.get("provider") or "").strip().lower()
+            if provider and (ident == provider or ident in provider):
+                return channel_int
+            for cls in service.get("class_ids") or []:
+                label = str(cls.get("label") or "").strip().lower()
+                uuid = str(cls.get("uuid") or "").strip().lower()
+                if ident in {label, uuid}:
+                    return channel_int
+            for uuid in service.get("uuids") or []:
+                uuid_lower = str(uuid or "").strip().lower()
+                if ident == uuid_lower:
+                    return channel_int
+        return None
+
     async def _toggle_with_commands(
         self,
         device: Device,
@@ -771,21 +1028,21 @@ class DeviceManager:
     ) -> bool:
         metadata = device.metadata or {}
         if target_state and "power_on" in commands:
-            await self._perform_ble_command(device, commands["power_on"])
+            await self._execute_command(device, commands["power_on"])
             metadata["is_on"] = True
             device.status = "online"
             metadata["last_toggle"] = timestamp
             device.metadata = metadata
             return True
         if not target_state and "power_off" in commands:
-            await self._perform_ble_command(device, commands["power_off"])
+            await self._execute_command(device, commands["power_off"])
             metadata["is_on"] = False
             device.status = "offline"
             metadata["last_toggle"] = timestamp
             device.metadata = metadata
             return False
         if "power_toggle" in commands:
-            await self._perform_ble_command(device, commands["power_toggle"])
+            await self._execute_command(device, commands["power_toggle"])
             current = bool(metadata.get("is_on", device.status == "online"))
             metadata["is_on"] = not current
             device.status = "online" if metadata["is_on"] else "offline"
