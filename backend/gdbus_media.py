@@ -1,10 +1,11 @@
-"""Helper to call BlueZ MediaPlayer methods via gdbus.
+"""Helper to call BlueZ MediaPlayer/MediaControl methods via gdbus.
 
-This uses the system bus gdbus binary to avoid dbus-next compatibility issues
-observed on some Pi setups.
+This wrapper keeps the implementation in one place so the backend can
+trigger classic Bluetooth AVRCP commands without depending on dbus-next.
 """
-import shlex
+
 import subprocess
+import time
 from typing import Optional
 
 
@@ -208,17 +209,77 @@ def _call_player_method(mac: str, method: str) -> None:
         raise RuntimeError(f"gdbus command failed: {details}")
 
 
+def _run_bluetoothctl(address: str, command: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            ["bluetoothctl", command, address],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError("bluetoothctl not found. Install bluez or bluez-tools") from error
+
+
+def _ensure_media_connected(mac: str, attempts: int = 2, delay: float = 1.0) -> None:
+    dev_path = _mac_to_path(mac)
+    for attempt in range(attempts + 1):
+        try:
+            prop_cmd = [
+                "gdbus",
+                "call",
+                "--system",
+                "--dest",
+                "org.bluez",
+                "--object-path",
+                dev_path,
+                "--method",
+                "org.freedesktop.DBus.Properties.Get",
+                "org.bluez.MediaControl1",
+                "Connected",
+            ]
+            prop = subprocess.run(prop_cmd, capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            raise RuntimeError("gdbus not found; install libglib2.0-bin")
+        if prop.returncode == 0 and "true" in (prop.stdout or "").lower():
+            return
+        if attempt >= attempts:
+            break
+        # try to connect via bluetoothctl and retry
+        connect = _run_bluetoothctl(mac, "connect")
+        if connect.returncode != 0:
+            # give the adapter a moment, then retry regardless to surface clearer error
+            time.sleep(delay)
+        else:
+            time.sleep(delay)
+    raise RuntimeError("Media controller not connected; ensure the device is paired and reachable")
+
+
 def play(mac: str) -> None:
+    _ensure_media_connected(mac)
     _call_player_method(mac, "Play")
 
 
 def pause(mac: str) -> None:
+    _ensure_media_connected(mac)
     _call_player_method(mac, "Pause")
 
 
 def next_track(mac: str) -> None:
+    _ensure_media_connected(mac)
     _call_player_method(mac, "Next")
 
 
 def previous_track(mac: str) -> None:
+    _ensure_media_connected(mac)
     _call_player_method(mac, "Previous")
+
+
+def volume_up(mac: str) -> None:
+    _ensure_media_connected(mac)
+    _call_player_method(mac, "VolumeUp")
+
+
+def volume_down(mac: str) -> None:
+    _ensure_media_connected(mac)
+    _call_player_method(mac, "VolumeDown")

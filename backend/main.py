@@ -401,6 +401,9 @@ async def media_play(device_id: str) -> Dict[str, str]:
     # Validate client-provided device state before attempting media control
     if not device.address:
         raise HTTPException(status_code=400, detail="Device missing bluetooth address")
+    media_caps = (device.capabilities or {}).get("media", {}) if hasattr(device, "capabilities") else {}
+    if media_caps and not media_caps.get("avrcp", False):
+        raise HTTPException(status_code=400, detail="Device does not expose AVRCP controls")
     try:
         # import lazily to avoid import-time circular dependencies and to
         # surface a clearer error if gdbus/media_control isn't available.
@@ -420,6 +423,9 @@ async def media_pause(device_id: str) -> Dict[str, str]:
         raise HTTPException(status_code=404, detail="Unknown device")
     if not device.address:
         raise HTTPException(status_code=400, detail="Device missing bluetooth address")
+    media_caps = (device.capabilities or {}).get("media", {}) if hasattr(device, "capabilities") else {}
+    if media_caps and not media_caps.get("avrcp", False):
+        raise HTTPException(status_code=400, detail="Device does not expose AVRCP controls")
     try:
         import gdbus_media as _mc
         await asyncio.to_thread(_mc.pause, device.address)
@@ -435,6 +441,9 @@ async def media_next(device_id: str) -> Dict[str, str]:
         raise HTTPException(status_code=404, detail="Unknown device")
     if not device.address:
         raise HTTPException(status_code=400, detail="Device missing bluetooth address")
+    media_caps = (device.capabilities or {}).get("media", {}) if hasattr(device, "capabilities") else {}
+    if media_caps and not media_caps.get("avrcp", False):
+        raise HTTPException(status_code=400, detail="Device does not expose AVRCP controls")
     try:
         import gdbus_media as _mc
         await asyncio.to_thread(_mc.next_track, device.address)
@@ -450,12 +459,51 @@ async def media_previous(device_id: str) -> Dict[str, str]:
         raise HTTPException(status_code=404, detail="Unknown device")
     if not device.address:
         raise HTTPException(status_code=400, detail="Device missing bluetooth address")
+    media_caps = (device.capabilities or {}).get("media", {}) if hasattr(device, "capabilities") else {}
+    if media_caps and not media_caps.get("avrcp", False):
+        raise HTTPException(status_code=400, detail="Device does not expose AVRCP controls")
     try:
         import gdbus_media as _mc
         await asyncio.to_thread(_mc.previous_track, device.address)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"status": "ok", "action": "previous", "device": device_id}
+
+
+@app.post("/api/devices/{device_id}/media/volume/up")
+async def media_volume_up(device_id: str) -> Dict[str, str]:
+    device = await manager.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Unknown device")
+    if not device.address:
+        raise HTTPException(status_code=400, detail="Device missing bluetooth address")
+    media_caps = (device.capabilities or {}).get("media", {}) if hasattr(device, "capabilities") else {}
+    if media_caps and not media_caps.get("avrcp", False):
+        raise HTTPException(status_code=400, detail="Device does not expose AVRCP controls")
+    try:
+        import gdbus_media as _mc
+        await asyncio.to_thread(_mc.volume_up, device.address)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"status": "ok", "action": "volume_up", "device": device_id}
+
+
+@app.post("/api/devices/{device_id}/media/volume/down")
+async def media_volume_down(device_id: str) -> Dict[str, str]:
+    device = await manager.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Unknown device")
+    if not device.address:
+        raise HTTPException(status_code=400, detail="Device missing bluetooth address")
+    media_caps = (device.capabilities or {}).get("media", {}) if hasattr(device, "capabilities") else {}
+    if media_caps and not media_caps.get("avrcp", False):
+        raise HTTPException(status_code=400, detail="Device does not expose AVRCP controls")
+    try:
+        import gdbus_media as _mc
+        await asyncio.to_thread(_mc.volume_down, device.address)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"status": "ok", "action": "volume_down", "device": device_id}
 
 
 @app.get("/api/settings")
