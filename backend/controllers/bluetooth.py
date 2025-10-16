@@ -323,6 +323,176 @@ class BluetoothController:
         except FileNotFoundError as error:
             raise RuntimeError("bluetoothctl not found. Install bluez-utils or bluez package.") from error
 
+    def inspect_classic_capabilities(self, address: str) -> Dict[str, object]:
+        """Return a summary of classic Bluetooth profiles exposed by a device."""
+        summary: Dict[str, object] = {}
+        if not address:
+            return summary
+
+        try:
+            result = subprocess.run(
+                ["sdptool", "browse", address],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+        except FileNotFoundError:
+            logger.debug("sdptool not available; skipping classic capability inspection")
+            return summary
+        except subprocess.TimeoutExpired:
+            logger.warning("sdptool browse %s timed out", address)
+            return summary
+
+        output = (result.stdout or "").strip()
+        if not output:
+            return summary
+
+        services: List[Dict[str, object]] = []
+        current: Dict[str, object] = {}
+        section: Optional[str] = None
+
+        def flush_current() -> None:
+            nonlocal current
+            if current:
+                # normalise lists
+                if "class_ids" in current:
+                    current["class_ids"] = current.get("class_ids", [])
+                if "uuids" in current:
+                    current["uuids"] = current.get("uuids", [])
+                services.append(current)
+                current = {}
+
+        class_regex = re.compile(r"\"?([^\"]+)\"?\s*\((0x[0-9a-fA-F]+)\)")
+        uuid128_regex = re.compile(r"UUID 128:\s*([0-9A-Fa-f-]+)")
+
+        for raw_line in output.splitlines():
+            line = raw_line.rstrip()
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("Service RecHandle"):
+                flush_current()
+                current = {"rec_handle": stripped.split(":", 1)[-1].strip()}
+                section = None
+                continue
+            if stripped.startswith("Service Name:"):
+                current["name"] = stripped.split(":", 1)[-1].strip()
+                continue
+            if stripped.startswith("Service Provider:"):
+                current["provider"] = stripped.split(":", 1)[-1].strip()
+                continue
+            if stripped.startswith("Service Class ID List"):
+                section = "class"
+                current.setdefault("class_ids", [])
+                continue
+            if stripped.startswith("Protocol Descriptor List"):
+                section = "protocol"
+                current.setdefault("protocols", [])
+                continue
+            if stripped.startswith("Profile Descriptor List"):
+                section = None
+                continue
+
+            if section == "class":
+                match = class_regex.search(stripped)
+                uuid_match = uuid128_regex.search(stripped)
+                if match:
+                    label, hex_id = match.groups()
+                    current.setdefault("class_ids", []).append({"label": label, "uuid": hex_id})
+                elif uuid_match:
+                    current.setdefault("uuids", []).append(uuid_match.group(1).lower())
+                continue
+
+            if section == "protocol":
+                # Capture RFCOMM channels and PSM entries
+                if "Channel:" in stripped:
+                    try:
+                        channel = int(stripped.split("Channel:", 1)[1].strip())
+                        current["rfcomm_channel"] = channel
+                    except ValueError:
+                        pass
+                    continue
+                if "PSM:" in stripped:
+                    try:
+                        psm_value = int(stripped.split("PSM:", 1)[1].strip())
+                        current.setdefault("psm", []).append(psm_value)
+                    except ValueError:
+                        pass
+                    continue
+                proto_match = class_regex.search(stripped)
+                if proto_match:
+                    label, hex_id = proto_match.groups()
+                    current.setdefault("protocols", []).append({"label": label, "uuid": hex_id})
+                continue
+
+        flush_current()
+
+        profile_flags: Dict[str, bool] = {
+            "avrcp_controller": False,
+            "avrcp_target": False,
+            "audio_sink": False,
+            "audio_source": False,
+            "handsfree_gateway": False,
+            "headset_gateway": False,
+            "hid": False,
+        }
+        rfcomm_channels: Dict[str, int] = {}
+        l2cap_psm: Dict[str, int] = {}
+
+        uuid_flag_map = {
+            "0x110e": "avrcp_controller",
+            "0x110f": "avrcp_controller",
+            "0x110c": "avrcp_target",
+            "0x110b": "audio_sink",
+            "0x110a": "audio_source",
+            "0x111f": "handsfree_gateway",
+            "0x1112": "headset_gateway",
+            "0x1124": "hid",
+        }
+
+        for service in services:
+            for class_entry in service.get("class_ids", []):
+                try:
+                    hex_code = class_entry.get("uuid")
+                except AttributeError:
+                    continue
+                if not hex_code:
+                    continue
+                flag = uuid_flag_map.get(hex_code.lower())
+                if flag:
+                    profile_flags[flag] = True
+            # vendor UUIDs
+            for uuid_entry in service.get("uuids", []):
+                uuid_lower = uuid_entry.lower()
+                if uuid_lower not in rfcomm_channels and service.get("rfcomm_channel") is not None:
+                    rfcomm_channels[uuid_lower] = service["rfcomm_channel"]
+            # if RFCOMM but no UUID listed, fall back to service name
+            if service.get("rfcomm_channel") is not None and service.get("class_ids"):
+                primary = service["class_ids"][0]
+                uuid_lower = primary.get("uuid", "").lower()
+                if uuid_lower and uuid_lower not in rfcomm_channels:
+                    rfcomm_channels[uuid_lower] = service["rfcomm_channel"]
+            if service.get("psm"):
+                # Map known PSM values
+                for psm_value in service["psm"]:
+                    if psm_value == 23:
+                        l2cap_psm.setdefault("avctp", psm_value)
+                    elif psm_value == 25:
+                        l2cap_psm.setdefault("avdtp", psm_value)
+                    elif psm_value == 17:
+                        l2cap_psm.setdefault("hidcontrol", psm_value)
+                    elif psm_value == 19:
+                        l2cap_psm.setdefault("hidinterrupt", psm_value)
+
+        summary["profiles"] = sorted([key for key, enabled in profile_flags.items() if enabled])
+        if rfcomm_channels:
+            summary["rfcomm_channels"] = rfcomm_channels
+        if l2cap_psm:
+            summary["l2cap_psm"] = l2cap_psm
+        summary["services"] = services
+        return summary
+
     @staticmethod
     def _is_already_paired(stderr: Optional[str], stdout: Optional[str]) -> bool:
         text = " ".join(filter(None, [stderr or "", stdout or ""]))

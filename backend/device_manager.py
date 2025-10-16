@@ -36,6 +36,7 @@ class Device:
     firmware: str = "Unknown"
     address: Optional[str] = None
     metadata: Dict[str, object] = field(default_factory=dict)
+    capabilities: Dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, object]:
         payload = asdict(self)
@@ -45,6 +46,8 @@ class Device:
             payload.pop("address", None)
         if not payload.get("metadata"):
             payload["metadata"] = {}
+        if not payload.get("capabilities"):
+            payload["capabilities"] = {}
         # Expose paired/trusted at top level for UI convenience
         metadata = payload.get("metadata") or {}
         payload["paired"] = bool(metadata.get("paired", False))
@@ -65,6 +68,7 @@ class Device:
             firmware=entry.get("firmware", "Unknown"),
             address=entry.get("address"),
             metadata=entry.get("metadata", {}) or {},
+            capabilities=entry.get("capabilities", {}) or {},
         )
 
 
@@ -488,6 +492,17 @@ class DeviceManager:
                 metadata["pair_agent"] = "NoInputNoOutput"
             except Exception as error:
                 raise ValueError(f"Pairing failed: {error}") from error
+
+        classic_caps = await asyncio.to_thread(self.bluetooth.inspect_classic_capabilities, address)
+        if classic_caps:
+            metadata["classic_capabilities"] = json.loads(json.dumps(classic_caps))
+            classic_profiles = set(classic_caps.get("profiles", []))
+            device.capabilities.setdefault("classic", {}).update(classic_caps)
+            if classic_profiles:
+                media_caps = device.capabilities.setdefault("media", {})
+                media_caps["avrcp"] = bool({"avrcp_controller", "avrcp_target"} & classic_profiles)
+                media_caps["audio_sink"] = "audio_sink" in classic_profiles
+                media_caps["handsfree"] = "handsfree_gateway" in classic_profiles or "headset_gateway" in classic_profiles
 
         metadata.update(
             {
