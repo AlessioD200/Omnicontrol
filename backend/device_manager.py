@@ -4,12 +4,19 @@ import asyncio
 import json
 import os
 import re
+import uuid
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from controllers import BluetoothController, HomeKitController, TapoController
+from controllers import (
+    BluetoothController,
+    HomeKitController,
+    SamsungRemoteController,
+    TapoController,
+    generate_client_id,
+)
 import classic_rfcomm
 import logging
 
@@ -84,6 +91,7 @@ class DeviceManager:
         self.bluetooth = BluetoothController()
         self.homekit = HomeKitController(HOMEKIT_STORE_FILE)
         self.tapo = TapoController()
+        self.samsung = SamsungRemoteController()
         self._ensure_directories()
 
     def _ensure_directories(self) -> None:
@@ -338,6 +346,19 @@ class DeviceManager:
                 metadata["last_toggle"] = now
                 device.metadata = metadata
             device.status = "online" if result else "offline"
+        elif any(proto in device.protocols for proto in {"samsung", "smartview"}):
+            target_state = device.status != "online"
+            command_map = self._command_map(device)
+            samsung_commands = {
+                key: value
+                for key, value in command_map.items()
+                if key.startswith("power_") and str(value.get("transport") or "").lower() == "samsung"
+            }
+            if samsung_commands:
+                result_state = await self._toggle_with_commands(device, command_map, target_state, now)
+                device.status = "online" if result_state else "offline"
+            else:
+                raise ValueError("Samsung device missing power command mapping")
         elif "homekit" in device.protocols:
             pairing_id = device.metadata.get("pairing_id")
             aid = device.metadata.get("aid")
@@ -591,23 +612,38 @@ class DeviceManager:
         device = self.devices.get(device_id)
         if not device:
             raise ValueError("Unknown device")
-        if "bluetooth" not in device.protocols:
-            raise ValueError("Device does not support Bluetooth commands")
-        if not device.address:
-            raise ValueError("Bluetooth device missing address")
 
         command_map = self._command_map(device)
         command = command_map.get(command_id)
         if not command:
             raise ValueError(f"Command '{command_id}' not configured for {device.name}")
 
+        transport = str(command.get("transport") or "ble").lower()
+        if transport in {"ble", "rfcomm"}:
+            if "bluetooth" not in device.protocols:
+                raise ValueError("Device does not support Bluetooth commands")
+            if not device.address:
+                raise ValueError("Bluetooth device missing address")
+        elif transport == "samsung":
+            if not any(proto in device.protocols for proto in {"samsung", "smartview"}):
+                raise ValueError("Device does not support Samsung SmartView commands")
+        else:
+            raise ValueError(f"Unsupported command transport '{transport}'")
+
         response_payload = await self._execute_command(device, command)
 
         now = datetime.utcnow().isoformat()
         metadata = device.metadata or {}
-        last_entry = {"id": command_id, "at": now, "transport": command.get("transport", "ble")}
+        last_entry = {"id": command_id, "at": now, "transport": transport}
         if response_payload:
-            last_entry["response_hex"] = response_payload.hex()
+            last_entry["response_len"] = len(response_payload)
+            if transport == "samsung":
+                try:
+                    last_entry["response_json"] = json.loads(response_payload.decode("utf-8"))
+                except Exception:
+                    last_entry["response_hex"] = response_payload.hex()
+            else:
+                last_entry["response_hex"] = response_payload.hex()
         metadata["last_command"] = last_entry
         command_id_lower = command_id.lower()
         if command_id_lower == "power_off":
@@ -633,10 +669,6 @@ class DeviceManager:
         device = self.devices.get(device_id)
         if not device:
             raise ValueError("Unknown device")
-        if "bluetooth" not in device.protocols:
-            raise ValueError("Device does not support Bluetooth commands")
-        if not device.address:
-            raise ValueError("Bluetooth device missing address")
 
         inline_spec = dict(payload)
         inline_spec["id"] = inline_spec.get("id") or "__inline__"
@@ -644,6 +676,18 @@ class DeviceManager:
             normalized = self._normalize_command_spec(inline_spec)
         except ValueError as exc:
             raise ValueError(f"Invalid command specification: {exc}") from exc
+
+        transport = str(normalized.get("transport") or "ble").lower()
+        if transport in {"ble", "rfcomm"}:
+            if "bluetooth" not in device.protocols:
+                raise ValueError("Device does not support Bluetooth commands")
+            if not device.address:
+                raise ValueError("Bluetooth device missing address")
+        elif transport == "samsung":
+            if not any(proto in device.protocols for proto in {"samsung", "smartview"}):
+                raise ValueError("Device does not support Samsung SmartView commands")
+        else:
+            raise ValueError(f"Unsupported command transport '{transport}'")
 
         payload_len = 0
         if normalized.get("payload_hex"):
@@ -655,10 +699,10 @@ class DeviceManager:
 
         result: Dict[str, Any] = {
             "device": device_id,
-            "transport": normalized.get("transport", "ble"),
+            "transport": transport,
             "bytes_sent": payload_len,
         }
-        if normalized.get("transport") == "rfcomm":
+        if transport == "rfcomm":
             if normalized.get("rfcomm_channel") is not None:
                 result["rfcomm_channel"] = normalized["rfcomm_channel"]
             if normalized.get("service_uuid"):
@@ -670,8 +714,14 @@ class DeviceManager:
             if normalized.get("response_bytes") is not None:
                 result["response_expected"] = normalized.get("response_bytes")
         if response_payload:
-            result["response_hex"] = response_payload.hex()
             result["response_len"] = len(response_payload)
+            if transport == "samsung":
+                try:
+                    result["response_json"] = json.loads(response_payload.decode("utf-8"))
+                except Exception:
+                    result["response_hex"] = response_payload.hex()
+            else:
+                result["response_hex"] = response_payload.hex()
         return result
 
     async def update_settings(self, settings: Dict[str, object]) -> Dict[str, object]:
@@ -743,7 +793,7 @@ class DeviceManager:
         if not command_id:
             raise ValueError("Command id missing")
         transport = str(raw.get("transport") or raw.get("protocol") or "ble").strip().lower()
-        if transport not in {"ble", "rfcomm"}:
+        if transport not in {"ble", "rfcomm", "samsung"}:
             raise ValueError("Unsupported command transport")
         payload_hex_raw = raw.get("payload_hex")
         payload_ascii_raw = raw.get("payload_ascii")
@@ -764,7 +814,7 @@ class DeviceManager:
                 raise ValueError("Characteristic missing for BLE command")
             spec["characteristic"] = characteristic
             spec["with_response"] = bool(raw.get("with_response", False))
-        else:
+        elif transport == "rfcomm":
             channel_raw = raw.get("rfcomm_channel")
             channel_val: Optional[int] = None
             if channel_raw is not None and str(channel_raw).strip():
@@ -810,6 +860,59 @@ class DeviceManager:
                 spec["wait_ms"] = wait_int
             if "rfcomm_channel" not in spec and "service_uuid" not in spec and "service_name" not in spec:
                 raise ValueError("RFCOMM command requires rfcomm_channel, service_uuid, or service_name")
+        else:  # samsung remote
+            key_code = str(
+                raw.get("key")
+                or raw.get("key_code")
+                or raw.get("data_of_cmd")
+                or raw.get("data")
+                or ""
+            ).strip().upper()
+            if not key_code:
+                raise ValueError("Samsung command missing key")
+            spec["key"] = key_code
+            cmd_value = str(raw.get("cmd") or raw.get("action") or "Click").strip()
+            if cmd_value:
+                spec["cmd"] = cmd_value
+            option_value = raw.get("option")
+            if option_value is not None:
+                spec["option"] = option_value
+            remote_type = str(raw.get("remote_type") or raw.get("type_of_remote") or "SendRemoteKey").strip()
+            if remote_type:
+                spec["remote_type"] = remote_type
+            repeat_value = raw.get("repeat")
+            if repeat_value is not None and str(repeat_value).strip() != "":
+                try:
+                    repeat_int = int(repeat_value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("repeat must be an integer") from exc
+                if repeat_int <= 0:
+                    raise ValueError("repeat must be >= 1")
+                spec["repeat"] = repeat_int
+            delay_ms_value = raw.get("repeat_delay_ms")
+            delay_seconds_value = raw.get("repeat_delay")
+            if delay_ms_value is not None and str(delay_ms_value).strip() != "":
+                try:
+                    delay_ms = int(float(delay_ms_value))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("repeat_delay_ms must be numeric") from exc
+                if delay_ms < 0:
+                    raise ValueError("repeat_delay_ms must be >= 0")
+                spec["repeat_delay_ms"] = delay_ms
+            elif delay_seconds_value is not None and str(delay_seconds_value).strip() != "":
+                try:
+                    delay_seconds = float(delay_seconds_value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("repeat_delay must be numeric") from exc
+                if delay_seconds < 0:
+                    raise ValueError("repeat_delay must be >= 0")
+                spec["repeat_delay_ms"] = int(round(delay_seconds * 1000))
+            token_override = raw.get("token")
+            if token_override:
+                spec["token"] = str(token_override)
+            ip_override = raw.get("ip") or raw.get("host")
+            if ip_override:
+                spec["ip"] = str(ip_override)
         if payload_hex:
             spec["payload_hex"] = payload_hex
         elif isinstance(payload_ascii_raw, str) and payload_ascii_raw:
@@ -833,7 +936,7 @@ class DeviceManager:
                     continue
                 normalized = dict(entry)
                 transport = str(normalized.get("transport") or "ble").lower()
-                if transport not in {"ble", "rfcomm"}:
+                if transport not in {"ble", "rfcomm", "samsung"}:
                     transport = "ble"
                 normalized["transport"] = transport
                 if transport == "rfcomm" and normalized.get("rfcomm_channel") is not None:
@@ -845,6 +948,8 @@ class DeviceManager:
 
         _ingest(metadata.get("ble_commands"))
         _ingest(metadata.get("classic_commands"))
+        _ingest(metadata.get("network_commands"))
+        _ingest(metadata.get("samsung_commands"))
 
         def _apply_mapping(mapping: Any) -> None:
             if not isinstance(mapping, dict):
@@ -890,6 +995,122 @@ class DeviceManager:
         )
         return b""
 
+    async def _perform_samsung_command(self, device: Device, command: Dict[str, Any]) -> bytes:
+        metadata = device.metadata or {}
+
+        raw_ip = command.get("ip") or command.get("host")
+        ip = str(
+            raw_ip
+            or metadata.get("samsung_ip")
+            or metadata.get("smartview_ip")
+            or metadata.get("ip")
+            or device.address
+            or ""
+        ).strip()
+        if not ip:
+            raise ValueError("Samsung device missing IP address")
+
+        updated = False
+        if raw_ip and metadata.get("samsung_ip") != ip:
+            metadata["samsung_ip"] = ip
+            updated = True
+
+        existing_client_id = metadata.get("samsung_client_id") or metadata.get("smartview_client_id")
+        client_id = str(command.get("client_id") or existing_client_id or "").strip()
+        if not client_id:
+            client_id = generate_client_id()
+            metadata["samsung_client_id"] = client_id
+            updated = True
+        elif metadata.get("samsung_client_id") != client_id:
+            metadata["samsung_client_id"] = client_id
+            updated = True
+
+        friendly_name = str(
+            command.get("name")
+            or metadata.get("samsung_remote_name")
+            or device.name
+            or "Omnicontrol"
+        ).strip()
+        if not friendly_name:
+            friendly_name = "Omnicontrol"
+        if command.get("name") and metadata.get("samsung_remote_name") != friendly_name:
+            metadata["samsung_remote_name"] = friendly_name
+            updated = True
+
+        token_value = command.get("token") or metadata.get("samsung_token") or metadata.get("smartview_token")
+        token = str(token_value).strip() if isinstance(token_value, (str, int)) else None
+        if token == "":
+            token = None
+
+        key = str(command.get("key") or "").strip().upper()
+        if not key:
+            raise ValueError("Samsung command missing key")
+
+        action = str(command.get("cmd") or command.get("action") or "Click").strip() or "Click"
+        option_raw = command.get("option")
+        remote_type = str(command.get("remote_type") or "SendRemoteKey").strip() or "SendRemoteKey"
+
+        repeat_raw = command.get("repeat")
+        try:
+            repeat = int(repeat_raw) if repeat_raw is not None else 1
+        except (TypeError, ValueError) as exc:
+            raise ValueError("repeat must be an integer") from exc
+        if repeat <= 0:
+            repeat = 1
+
+        delay_ms = command.get("repeat_delay_ms")
+        delay_seconds = command.get("repeat_delay")
+        if delay_ms is not None:
+            try:
+                repeat_delay = max(0.0, float(delay_ms) / 1000.0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("repeat_delay_ms must be numeric") from exc
+        elif delay_seconds is not None:
+            try:
+                repeat_delay = max(0.0, float(delay_seconds))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("repeat_delay must be numeric") from exc
+        else:
+            repeat_delay = 0.0
+
+        result = await self.samsung.send_key(
+            ip=ip,
+            client_id=client_id,
+            name=friendly_name,
+            key=key,
+            token=token,
+            action=action,
+            option=option_raw if option_raw is not None else "false",
+            remote_type=remote_type,
+            repeat=repeat,
+            repeat_delay=repeat_delay,
+        )
+
+        if result.token:
+            metadata["samsung_token"] = result.token
+            updated = True
+        elif result.error and "unauthorized" in result.error.lower():
+            if metadata.pop("samsung_token", None) is not None:
+                updated = True
+        elif token and metadata.get("samsung_token") != token:
+            metadata["samsung_token"] = token
+            updated = True
+        metadata["samsung_last_command"] = {
+            "key": key,
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": result.error,
+        }
+        device.metadata = metadata
+        if updated:
+            await self._persist_devices()
+
+        payload = {
+            "token": result.token,
+            "messages": result.messages,
+            "error": result.error,
+        }
+        return json.dumps(payload).encode("utf-8")
+
     def _decode_payload_hex(self, payload_hex: str) -> bytes:
         cleaned = payload_hex.replace("0x", "")
         cleaned = "".join(ch for ch in cleaned if ch not in {" ", "-", ":", ",", "\n", "\t"})
@@ -902,6 +1123,8 @@ class DeviceManager:
 
     async def _execute_command(self, device: Device, command: Dict[str, Any]) -> bytes:
         transport = str(command.get("transport") or "ble").lower()
+        if transport == "samsung":
+            return await self._perform_samsung_command(device, command)
         if transport == "rfcomm":
             return await self._perform_rfcomm_command(device, command)
         return await self._perform_ble_command(device, command)

@@ -151,6 +151,26 @@ class CommandSpec(BaseModel):
     response_bytes: Optional[int] = Field(default=None, ge=0)
     response_timeout: Optional[float] = Field(default=None, ge=0.0)
     wait_ms: Optional[int] = Field(default=None, ge=0)
+    key: Optional[str] = None
+    cmd: Optional[str] = None
+    action: Optional[str] = None
+    option: Optional[str] = None
+    remote_type: Optional[str] = None
+    repeat: Optional[int] = Field(default=None, ge=1)
+    repeat_delay: Optional[float] = Field(default=None, ge=0.0)
+    repeat_delay_ms: Optional[int] = Field(default=None, ge=0)
+    token: Optional[str] = None
+    ip: Optional[str] = None
+    host: Optional[str] = None
+    client_id: Optional[str] = None
+    name: Optional[str] = None
+    key_code: Optional[str] = None
+    data_of_cmd: Optional[str] = None
+    data: Optional[str] = None
+    type_of_remote: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 
 class PairRequest(BaseModel):

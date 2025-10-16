@@ -7,3 +7,4 @@ bleak
 zeroconf
 aiohomekit
 dbus-next
+websockets
