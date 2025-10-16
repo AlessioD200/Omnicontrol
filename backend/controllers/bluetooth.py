@@ -249,33 +249,15 @@ class BluetoothController:
                     logger.exception('DBus BlueZ agent failed; falling back to bluetoothctl')
 
             # bluetoothctl fallback (existing behavior)
-            agent_result = await asyncio.to_thread(self._run_bluetoothctl, ["agent", self._agent_mode])
-            if agent_result.returncode != 0:
-                logger.warning("bluetoothctl agent %s returned %s; stdout=%s stderr=%s",
-                               self._agent_mode, agent_result.returncode,
-                               (agent_result.stdout or '').strip(), (agent_result.stderr or '').strip())
-
-            # Try to make the agent the default. If that fails, attempt a register fallback
-            default_result = await asyncio.to_thread(self._run_bluetoothctl, ["default-agent"])
-            if default_result.returncode != 0:
-                logger.warning("bluetoothctl default-agent failed: stdout=%s stderr=%s",
-                               (default_result.stdout or '').strip(), (default_result.stderr or '').strip())
-
-                register_result = await asyncio.to_thread(
-                    self._run_bluetoothctl,
-                    ["--timeout", "5", "register", "agent", self._agent_mode],
-                )
-                if register_result.returncode != 0:
-                    logger.warning("bluetoothctl register agent failed: stdout=%s stderr=%s",
-                                   (register_result.stdout or '').strip(), (register_result.stderr or '').strip())
-                else:
-                    default_result = await asyncio.to_thread(self._run_bluetoothctl, ["default-agent"])
-
-                if default_result.returncode != 0:
-                    raise RuntimeError(
-                        "unable to register/default the bluetooth agent: " +
-                        self._format_bt_error("default-agent", "", default_result)
-                    )
+                agent_result = await asyncio.to_thread(self._register_agent_via_bluetoothctl)
+                stdout = (agent_result.stdout or '').strip()
+                stderr = (agent_result.stderr or '').strip()
+                combined = " ".join(s for s in [stdout, stderr] if s)
+                if "Default agent request successful" not in combined and "Agent registered" not in combined:
+                    logger.warning('bluetoothctl agent registration output unexpected: stdout=%s stderr=%s', stdout, stderr)
+                    if agent_result.returncode != 0:
+                        raise RuntimeError(self._format_bt_error('agent', self._agent_mode, agent_result))
+                    # If exit code is zero but output is missing expected text, continue but log warning
 
             self._agent_ready = True
 
@@ -313,6 +295,23 @@ class BluetoothController:
 
     def _run_bluetoothctl(self, args: List[str]) -> subprocess.CompletedProcess:
         cmd = ["bluetoothctl"] + args
+        script = f"agent {self._agent_mode}\ndefault-agent\nquit\n"
+        try:
+            result = subprocess.run(
+                ["bluetoothctl"],
+                input=script,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            logger.debug('bluetoothctl agent script exited %s', result.returncode)
+            if result.stdout:
+                logger.debug('stdout: %s', result.stdout.strip())
+            if result.stderr:
+                logger.debug('stderr: %s', result.stderr.strip())
+            return result
+        except FileNotFoundError as error:
+            raise RuntimeError("bluetoothctl not found. Install bluez-utils or bluez package.") from error
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=False)
             logger.debug("bluetoothctl %s -> %s", " ".join(args), result.returncode)

@@ -6,7 +6,7 @@ After=network.target
 User=omnicontrol
 Group=omnicontrol
 WorkingDirectory=/home/omnicontrol/Omnicontrol/backend
-Environment="PATH=/home/omnicontrol/Omnicontrol/backend/.venv/bin"
+Environment="PATH=/home/omnicontrol/Omnicontrol/backend/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="OMNICONTROL_BLUEZ_AGENT_CAP=NoInputNoOutput"
 ExecStart=/home/omnicontrol/Omnicontrol/backend/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=on-failure

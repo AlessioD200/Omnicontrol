@@ -9,11 +9,11 @@ set -euo pipefail
 # - Installs and enables systemd units for backend + bluetooth agent
 #
 # Usage (run as root on a fresh Raspberry Pi OS Lite install):
-#   curl -sSL https://raw.githubusercontent.com/<your-org>/Omnicontrol/main/backend/scripts/bootstrap_pi.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/AlessioD200/Omnicontrol/main/backend/scripts/bootstrap_pi.sh | sudo bash
 # or copy this file onto the Pi and execute `sudo bash bootstrap_pi.sh`
 
 OMNICONTROL_USER=${OMNICONTROL_USER:-omnicontrol}
-REPO_URL=${REPO_URL:-https://github.com/<your-org>/Omnicontrol.git}
+REPO_URL=${REPO_URL:-https://github.com/AlessioD200/Omnicontrol.git}
 REPO_DIR=/home/${OMNICONTROL_USER}/Omnicontrol
 BACKEND_DIR="${REPO_DIR}/backend"
 VENV_DIR="${BACKEND_DIR}/.venv"
