@@ -202,6 +202,7 @@ class DeviceManager:
 
         if updated:
             await self._persist_devices()
+
         return new_devices
 
     async def _load_defaults(self) -> None:
@@ -625,7 +626,11 @@ class DeviceManager:
             if not device.address:
                 raise ValueError("Bluetooth device missing address")
         elif transport == "samsung":
-            if not any(proto in device.protocols for proto in {"samsung", "smartview"}):
+            # Allow Samsung commands if device protocols include samsung/smartview
+            # or if device metadata contains pairing info (token/client_id/ip)
+            has_proto = any(proto in device.protocols for proto in {"samsung", "smartview"})
+            has_meta = bool(device.metadata and any(k in device.metadata for k in ("samsung_token", "samsung_client_id", "smartview_token", "samsung_ip")))
+            if not (has_proto or has_meta):
                 raise ValueError("Device does not support Samsung SmartView commands")
         else:
             raise ValueError(f"Unsupported command transport '{transport}'")
@@ -774,6 +779,12 @@ class DeviceManager:
             updated = True
         if updated:
             await self._persist_devices()
+
+        # If pairing succeeded (we have a token), ensure device protocols include 'samsung'
+        if result.token:
+            if 'samsung' not in device.protocols:
+                device.protocols.append('samsung')
+                await self._persist_devices()
 
         return {"token": result.token, "messages": result.messages, "error": result.error}
 

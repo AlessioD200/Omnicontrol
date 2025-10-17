@@ -353,7 +353,14 @@ class OmniProvider extends ChangeNotifier {
     try {
       // If the device supports Samsung SmartView (protocol or metadata), prefer inline Samsung payload
       final dev = devices.firstWhere((d) => d.id == id, orElse: () => throw Exception('Unknown device'));
-      final supportsSamsung = dev.protocols.contains('samsung') || dev.protocols.contains('smartview') || (dev.metadata != null && (dev.metadata!.containsKey('samsung_commands') || dev.metadata!.containsKey('smartview_token')));
+      final supportsSamsung = dev.protocols.contains('samsung') || dev.protocols.contains('smartview') ||
+          (dev.metadata != null && (
+            dev.metadata!.containsKey('samsung_commands') ||
+            dev.metadata!.containsKey('smartview_token') ||
+            dev.metadata!.containsKey('samsung_token') ||
+            dev.metadata!.containsKey('samsung_client_id') ||
+            dev.metadata!.containsKey('samsung_ip')
+          ));
       if (supportsSamsung) {
         // Map logical action to SmartView key if available
         final key = samsungKeyMap[action] ?? action.toUpperCase();

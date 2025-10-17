@@ -22,6 +22,7 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
   Timer? _pollTimer;
   Map<String, dynamic>? _lastResponse;
   Map<String, dynamic>? _deviceMeta;
+  String? _controlTestResult;
 
   @override
   void initState() {
@@ -60,6 +61,17 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
             setState(() {
               _deviceMeta = found.metadata ?? {};
             });
+            // Try sending a quick test command to verify control
+            try {
+              await prov.remote(widget.deviceId, 'menu');
+              setState(() {
+                _controlTestResult = 'Test command sent: OK';
+              });
+            } catch (e) {
+              setState(() {
+                _controlTestResult = 'Test command failed: $e';
+              });
+            }
           }
         }
       } catch (_) {}
@@ -107,6 +119,17 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
           setState(() {
             _deviceMeta = found.metadata ?? {};
           });
+          // Try sending a quick test command to verify control
+          try {
+            await prov.remote(widget.deviceId, 'menu');
+            setState(() {
+              _controlTestResult = 'Test command sent: OK';
+            });
+          } catch (e) {
+            setState(() {
+              _controlTestResult = 'Test command failed: $e';
+            });
+          }
         }
       }
     } catch (e) {
@@ -145,6 +168,11 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
           if (_deviceMeta != null) ...[
             const Text('Device metadata (saved):'),
             SelectableText(const JsonEncoder.withIndent('  ').convert(_deviceMeta), style: const TextStyle(fontFamily: 'monospace')),
+            const SizedBox(height: 8),
+          ],
+          if (_controlTestResult != null) ...[
+            const Text('Control test:'),
+            SelectableText(_controlTestResult ?? '', style: const TextStyle(fontFamily: 'monospace')),
             const SizedBox(height: 8),
           ],
         ]),
