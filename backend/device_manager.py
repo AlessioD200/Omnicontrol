@@ -677,6 +677,26 @@ class DeviceManager:
 
         inline_spec = dict(payload)
         inline_spec["id"] = inline_spec.get("id") or "__inline__"
+        # If caller requested a Samsung inline command but didn't include a key
+        # attempt to derive it from action/cmd (fall back to uppercase action).
+        try:
+            transport_hint = str(inline_spec.get("transport") or inline_spec.get("protocol") or "").strip().lower()
+        except Exception:
+            transport_hint = ""
+        if transport_hint == "samsung":
+            key_present = False
+            for k in ("key", "key_code", "data_of_cmd", "data"):
+                v = inline_spec.get(k)
+                if v is not None and str(v).strip() != "":
+                    key_present = True
+                    break
+            if not key_present:
+                action_guess = inline_spec.get("action") or inline_spec.get("cmd")
+                if action_guess:
+                    inline_spec["key"] = str(action_guess).strip().upper()
+                else:
+                    # last resort: use ENTER as a benign key so pairing/test flows can proceed
+                    inline_spec["key"] = "ENTER"
         try:
             normalized = self._normalize_command_spec(inline_spec)
         except ValueError as exc:
