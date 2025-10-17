@@ -35,6 +35,12 @@ class SamsungRemoteController:
         self._ssl.check_hostname = False
         self._ssl.verify_mode = ssl.CERT_NONE
         self._locks: Dict[str, asyncio.Lock] = {}
+        # Keep a cache of active websockets per ip so we can reuse a connection
+        # and avoid prompting the user on the TV/monitor for each key press.
+        self._sockets: Dict[str, websockets.WebSocketClientProtocol] = {}
+        # Track whether we've completed the initial ms.channel.connect on a
+        # given socket (so we don't re-send connect repeatedly).
+        self._socket_connected: Dict[str, bool] = {}
         self._logger = logging.getLogger('controllers.samsung')
         self._verbose = bool(verbose)
         # If verbose, try to log to /var/log/omnicontrol/samsung.log when writable
@@ -76,14 +82,24 @@ class SamsungRemoteController:
             error_message: Optional[str] = None
 
             try:
-                async with websockets.connect(
-                    url,
-                    ssl=self._ssl,
-                    ping_interval=None,
-                    ping_timeout=None,
-                    close_timeout=1.0,
-                    max_size=4 * 1024 * 1024,
-                ) as websocket:
+                # Reuse an existing open websocket for this IP when possible.
+                websocket = self._sockets.get(ip)
+                if websocket is None or websocket.closed:
+                    websocket = await websockets.connect(
+                        url,
+                        ssl=self._ssl,
+                        ping_interval=30,
+                        ping_timeout=10,
+                        close_timeout=1.0,
+                        max_size=4 * 1024 * 1024,
+                    )
+                    self._sockets[ip] = websocket
+                    # Mark that we haven't yet sent ms.channel.connect on this socket
+                    self._socket_connected[ip] = False
+
+                # If we haven't yet performed the channel connect on this socket,
+                # do so now and drain initial handshake messages.
+                if not self._socket_connected.get(ip, False):
                     await self._send_connect(websocket, client_id, name, token)
                     handshake_msgs = await self._drain_until_idle(websocket, limit=4)
                     if self._verbose:
@@ -94,39 +110,39 @@ class SamsungRemoteController:
                     messages.extend(handshake_msgs)
                     extracted_token = extracted_token or self._extract_token(handshake_msgs)
                     error_message = self._first_error(handshake_msgs)
-
+                    # If handshake returned an authorization error, don't proceed.
                     if error_message and "unauthorized" in error_message.lower():
                         return SamsungRemoteResult(token=extracted_token, messages=messages, error=error_message)
+                    self._socket_connected[ip] = True
 
-                    payload = self._build_key_payload(key, action, option, remote_type)
-                    total = max(repeat, 1)
-                    for index in range(total):
-                        await websocket.send(payload)
-                        if repeat_delay > 0 and index < total - 1:
-                            await asyncio.sleep(repeat_delay)
+                # Build payload and send repeated keypresses on the same socket.
+                payload = self._build_key_payload(key, action, option, remote_type)
+                total = max(repeat, 1)
+                for index in range(total):
+                    await websocket.send(payload)
+                    if repeat_delay > 0 and index < total - 1:
+                        await asyncio.sleep(repeat_delay)
 
-                    ack_msgs = await self._drain_until_idle(websocket, limit=4)
-                    if self._verbose:
-                        try:
-                            self._logger.debug('Ack messages: %s', json.dumps(ack_msgs))
-                        except Exception:
-                            self._logger.debug('Ack messages: %r', ack_msgs)
-                    messages.extend(ack_msgs)
-                    extracted_token = extracted_token or self._extract_token(ack_msgs)
-                    error_message = error_message or self._first_error(ack_msgs)
-
+                # Drain for any ack messages produced by the key press(es).
+                ack_msgs = await self._drain_until_idle(websocket, limit=4)
+                if self._verbose:
                     try:
-                        await websocket.send(
-                            json.dumps(
-                                {
-                                    "method": "ms.channel.disconnect",
-                                    "params": {"client_id": client_id},
-                                }
-                            )
-                        )
+                        self._logger.debug('Ack messages: %s', json.dumps(ack_msgs))
                     except Exception:
-                        pass
+                        self._logger.debug('Ack messages: %r', ack_msgs)
+                messages.extend(ack_msgs)
+                extracted_token = extracted_token or self._extract_token(ack_msgs)
+                error_message = error_message or self._first_error(ack_msgs)
             except Exception as exc:
+                # If we hit an exception with the reused socket, close and remove it
+                try:
+                    ws = self._sockets.get(ip)
+                    if ws is not None and not ws.closed:
+                        await ws.close()
+                except Exception:
+                    pass
+                self._sockets.pop(ip, None)
+                self._socket_connected.pop(ip, None)
                 if self._verbose:
                     self._logger.exception('send_key failed: %s', exc)
                 return SamsungRemoteResult(token=extracted_token, messages=messages, error=str(exc))
