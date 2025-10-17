@@ -709,7 +709,11 @@ class DeviceManager:
             if not device.address:
                 raise ValueError("Bluetooth device missing address")
         elif transport == "samsung":
-            if not any(proto in device.protocols for proto in {"samsung", "smartview"}):
+            # Allow Samsung inline commands if device protocols include samsung/smartview
+            # or if device metadata contains pairing info (token/client_id/ip).
+            has_proto = any(proto in device.protocols for proto in {"samsung", "smartview"})
+            has_meta = bool(device.metadata and any(k in device.metadata for k in ("samsung_token", "samsung_client_id", "smartview_token", "samsung_ip")))
+            if not (has_proto or has_meta):
                 raise ValueError("Device does not support Samsung SmartView commands")
         else:
             raise ValueError(f"Unsupported command transport '{transport}'")
