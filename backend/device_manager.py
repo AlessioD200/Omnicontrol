@@ -774,6 +774,11 @@ class DeviceManager:
         if result.token:
             metadata["samsung_token"] = result.token
             updated = True
+            # Mark device as paired/trusted when we obtained a token
+            metadata["paired"] = True
+            metadata["trusted"] = True
+            device.status = "online"
+            device.last_seen = datetime.utcnow().isoformat()
         if metadata != (device.metadata or {}):
             device.metadata = metadata
             updated = True
