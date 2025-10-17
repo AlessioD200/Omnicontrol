@@ -213,9 +213,22 @@ class SamsungRemoteController:
                 return str(token)
             data = entry.get("data")
             if isinstance(data, dict):
+                # Direct token field
                 token = data.get("token")
                 if isinstance(token, (str, int)) and str(token):
                     return str(token)
+                # Some Samsung devices include client identifiers inside the
+                # ms.channel.connect payload: data.clients[].attributes.client_id
+                clients = data.get("clients")
+                if isinstance(clients, list):
+                    for client in clients:
+                        if not isinstance(client, dict):
+                            continue
+                        attrs = client.get("attributes")
+                        if isinstance(attrs, dict):
+                            cid = attrs.get("client_id") or attrs.get("clientId")
+                            if isinstance(cid, (str, int)) and str(cid):
+                                return str(cid)
         return None
 
     def _maybe_parse(self, payload: Any) -> Optional[Dict[str, Any]]:

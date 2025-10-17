@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/omni_provider.dart';
@@ -19,6 +20,8 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
   final TextEditingController _pinController = TextEditingController();
   String _status = 'idle';
   Timer? _pollTimer;
+  Map<String, dynamic>? _lastResponse;
+  Map<String, dynamic>? _deviceMeta;
 
   @override
   void initState() {
@@ -50,6 +53,14 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
           _pollTimer?.cancel();
           // refresh provider to pick up any metadata changes
           await prov.refresh();
+          // capture device metadata for display
+          final foundList = prov.devices.where((d) => d.id == widget.deviceId).toList();
+          if (foundList.isNotEmpty) {
+            final found = foundList.first;
+            setState(() {
+              _deviceMeta = found.metadata ?? {};
+            });
+          }
         }
       } catch (_) {}
     });
@@ -76,6 +87,7 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
       final body = {'ip': ip, 'name': name};
       if (_pinController.text.trim().isNotEmpty) body['pin'] = _pinController.text.trim();
       final resp = await prov.api.sendPairSamsung(widget.deviceId, body);
+      _lastResponse = resp;
       // If backend started a job instead of immediate result, handle it
       if (resp.containsKey('job_id')) {
         final jobId = resp['job_id'] as String;
@@ -89,6 +101,13 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
         });
         // refresh provider to pick up metadata changes
         await prov.refresh();
+        final foundList = prov.devices.where((d) => d.id == widget.deviceId).toList();
+        if (foundList.isNotEmpty) {
+          final found = foundList.first;
+          setState(() {
+            _deviceMeta = found.metadata ?? {};
+          });
+        }
       }
     } catch (e) {
       setState(() {
@@ -117,6 +136,17 @@ class _SamsungPairingPageState extends State<SamsungPairingPage> {
           ]),
           const SizedBox(height: 20),
           Text('Status: $_status'),
+          const SizedBox(height: 8),
+          if (_lastResponse != null) ...[
+            const Text('Response:'),
+            SelectableText(const JsonEncoder.withIndent('  ').convert(_lastResponse), style: const TextStyle(fontFamily: 'monospace')),
+            const SizedBox(height: 8),
+          ],
+          if (_deviceMeta != null) ...[
+            const Text('Device metadata (saved):'),
+            SelectableText(const JsonEncoder.withIndent('  ').convert(_deviceMeta), style: const TextStyle(fontFamily: 'monospace')),
+            const SizedBox(height: 8),
+          ],
         ]),
       ),
     );
