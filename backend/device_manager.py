@@ -91,7 +91,7 @@ class DeviceManager:
         self.bluetooth = BluetoothController()
         self.homekit = HomeKitController(HOMEKIT_STORE_FILE)
         self.tapo = TapoController()
-        self.samsung = SamsungRemoteController()
+        self.samsung = SamsungRemoteController(verbose=bool(os.getenv('OMNICONTROL_SAMSUNG_VERBOSE', '')))
         self._ensure_directories()
 
     def _ensure_directories(self) -> None:
@@ -723,6 +723,59 @@ class DeviceManager:
             else:
                 result["response_hex"] = response_payload.hex()
         return result
+
+    async def pair_samsung_device(self, device_id: str, ip: str, name: Optional[str] = None, pin: Optional[str] = None) -> Dict[str, Any]:
+        """Attempt to pair with a Samsung SmartView device.
+
+        This will try to establish a SmartView websocket, send a harmless key to
+        trigger token issuance, persist client_id/ip/token into device metadata
+        and return the controller result.
+        """
+        device = self.devices.get(device_id)
+        if not device:
+            raise ValueError("Unknown device")
+
+        metadata = device.metadata or {}
+        ip_val = str(ip).strip()
+        if not ip_val:
+            raise ValueError("IP required")
+
+        existing_client = metadata.get("samsung_client_id") or metadata.get("smartview_client_id")
+        client_id = existing_client or generate_client_id()
+        if not existing_client:
+            metadata["samsung_client_id"] = client_id
+
+        friendly_name = (name or metadata.get("samsung_remote_name") or device.name or "Omnicontrol")
+
+        # persist ip immediately so subsequent operations can reference it
+        metadata["samsung_ip"] = ip_val
+        device.metadata = metadata
+        await self._persist_devices()
+
+        # Try to send a benign key press to obtain/refresh token
+        try:
+            result = await self.samsung.send_key(
+                ip=ip_val,
+                client_id=client_id,
+                name=friendly_name,
+                key="MENU",
+                token=None,
+                action="Click",
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Pairing attempt failed: {exc}") from exc
+
+        updated = False
+        if result.token:
+            metadata["samsung_token"] = result.token
+            updated = True
+        if metadata != (device.metadata or {}):
+            device.metadata = metadata
+            updated = True
+        if updated:
+            await self._persist_devices()
+
+        return {"token": result.token, "messages": result.messages, "error": result.error}
 
     async def update_settings(self, settings: Dict[str, object]) -> Dict[str, object]:
         self._settings_path.write_text(json.dumps(settings, indent=2))

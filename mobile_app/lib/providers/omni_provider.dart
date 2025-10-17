@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../config/app_config.dart';
+import '../data/samsung_keys.dart';
 import '../models/device.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -350,12 +351,35 @@ class OmniProvider extends ChangeNotifier {
   Future<void> remote(String id, String action) async {
     lastError = null;
     try {
+      // If the device supports Samsung SmartView (protocol or metadata), prefer inline Samsung payload
+      final dev = devices.firstWhere((d) => d.id == id, orElse: () => throw Exception('Unknown device'));
+      final supportsSamsung = dev.protocols.contains('samsung') || dev.protocols.contains('smartview') || (dev.metadata != null && (dev.metadata!.containsKey('samsung_commands') || dev.metadata!.containsKey('smartview_token')));
+      if (supportsSamsung) {
+        // Map logical action to SmartView key if available
+        final key = samsungKeyMap[action] ?? action.toUpperCase();
+        final payload = {
+          'command': {
+            'transport': 'samsung',
+            'key': key,
+            'cmd': 'Click',
+          }
+        };
+        await api.sendInlineCommand(id, payload);
+        return;
+      }
       await api.sendCommand(id, {"command": action});
     } catch (e) {
       // Try to connect the device and retry once
       try {
         final connected = await api.connectDevice(id);
         if (connected) {
+          final dev = devices.firstWhere((d) => d.id == id, orElse: () => throw Exception('Unknown device'));
+          final supportsSamsung = dev.protocols.contains('samsung') || dev.protocols.contains('smartview') || (dev.metadata != null && (dev.metadata!.containsKey('samsung_commands') || dev.metadata!.containsKey('smartview_token')));
+          if (supportsSamsung) {
+            final payload = {'command': {'transport': 'samsung', 'key': action.toUpperCase(), 'cmd': 'Click'}};
+            await api.sendInlineCommand(id, payload);
+            return;
+          }
           await api.sendCommand(id, {"command": action});
           return;
         }

@@ -272,6 +272,23 @@ async def send_inline_command(device_id: str, payload: InlineCommandRequest) -> 
     return result
 
 
+@app.post('/api/devices/{device_id}/pair_samsung')
+async def pair_samsung(device_id: str, payload: Dict[str, object]) -> Dict[str, object]:
+    device = await manager.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail='Unknown device')
+    ip = payload.get('ip')
+    name = payload.get('name')
+    pin = payload.get('pin')
+    if not ip:
+        raise HTTPException(status_code=400, detail='IP required')
+    try:
+        result = await manager.pair_samsung_device(device_id, ip=str(ip), name=name if isinstance(name, str) else None, pin=str(pin) if pin is not None else None)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return result
+
+
 @app.post('/api/devices/{device_id}/connect')
 async def connect_device(device_id: str) -> Dict[str, object]:
     device = await manager.get_device(device_id)

@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
 import websockets
+import logging
+import os
 
 
 @dataclass
@@ -28,11 +30,23 @@ class SamsungRemoteController:
     ships a self-signed SmartViewSDK CA on these devices.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, verbose: bool = False) -> None:
         self._ssl = ssl.create_default_context()
         self._ssl.check_hostname = False
         self._ssl.verify_mode = ssl.CERT_NONE
         self._locks: Dict[str, asyncio.Lock] = {}
+        self._logger = logging.getLogger('controllers.samsung')
+        self._verbose = bool(verbose)
+        # If verbose, try to log to /var/log/omnicontrol/samsung.log when writable
+        if self._verbose:
+            try:
+                logdir = '/var/log/omnicontrol'
+                os.makedirs(logdir, exist_ok=True)
+                fh = logging.FileHandler(os.path.join(logdir, 'samsung.log'))
+                fh.setLevel(logging.DEBUG)
+                self._logger.addHandler(fh)
+            except Exception:
+                pass
 
     async def send_key(
         self,
@@ -72,6 +86,11 @@ class SamsungRemoteController:
                 ) as websocket:
                     await self._send_connect(websocket, client_id, name, token)
                     handshake_msgs = await self._drain_until_idle(websocket, limit=4)
+                    if self._verbose:
+                        try:
+                            self._logger.debug('Handshake messages: %s', json.dumps(handshake_msgs))
+                        except Exception:
+                            self._logger.debug('Handshake messages: %r', handshake_msgs)
                     messages.extend(handshake_msgs)
                     extracted_token = extracted_token or self._extract_token(handshake_msgs)
                     error_message = self._first_error(handshake_msgs)
@@ -87,6 +106,11 @@ class SamsungRemoteController:
                             await asyncio.sleep(repeat_delay)
 
                     ack_msgs = await self._drain_until_idle(websocket, limit=4)
+                    if self._verbose:
+                        try:
+                            self._logger.debug('Ack messages: %s', json.dumps(ack_msgs))
+                        except Exception:
+                            self._logger.debug('Ack messages: %r', ack_msgs)
                     messages.extend(ack_msgs)
                     extracted_token = extracted_token or self._extract_token(ack_msgs)
                     error_message = error_message or self._first_error(ack_msgs)
@@ -103,6 +127,8 @@ class SamsungRemoteController:
                     except Exception:
                         pass
             except Exception as exc:
+                if self._verbose:
+                    self._logger.exception('send_key failed: %s', exc)
                 return SamsungRemoteResult(token=extracted_token, messages=messages, error=str(exc))
 
             return SamsungRemoteResult(token=extracted_token, messages=messages, error=error_message)

@@ -171,6 +171,13 @@ class ApiClient {
     if (res.statusCode >= 400) throw Exception('Command failed: ${res.body}');
   }
 
+  /// Send an inline command payload (useful for Samsung SmartView JSON payloads)
+  Future<Map<String, dynamic>> sendInlineCommand(String id, Map<String, dynamic> body) async {
+    final res = await http.post(_uri('/api/devices/$id/command-inline'), body: jsonEncode(body), headers: {'Content-Type': 'application/json'});
+    if (res.statusCode >= 400) throw Exception('Inline command failed: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // Media control helpers (calls to backend media endpoints)
   Future<void> mediaAction(String id, String action) async {
     final res = await http.post(_uri('/api/devices/$id/media/$action'));
@@ -211,6 +218,12 @@ class ApiClient {
   Future<void> postDeviceMetadata(String id, Map<String, dynamic> metadata) async {
     final res = await http.post(_uri('/api/devices/$id/metadata'), body: jsonEncode(metadata), headers: {'Content-Type':'application/json'});
     if (res.statusCode >= 400) throw Exception('Failed to update metadata: ${res.body}');
+  }
+
+  Future<Map<String, dynamic>> sendPairSamsung(String id, Map<String, dynamic> body) async {
+    final res = await http.post(_uri('/api/devices/$id/pair_samsung'), body: jsonEncode(body), headers: {'Content-Type': 'application/json'});
+    if (res.statusCode >= 400) throw Exception('Pairing failed: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> getStreamInfo(String id) async {
